@@ -6,6 +6,7 @@ export default defineConfig({
       input: {
         index: 'index.html',
         audioLab: 'audio-lab.html',
+        humLab: 'hum-lab.html',
         musicLab: 'music-lab.html',
       },
     },

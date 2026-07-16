@@ -168,6 +168,13 @@ select {
   grid-template-columns: minmax(160px, 0.54fr) minmax(420px, 1.72fr) minmax(260px, 0.9fr);
 }
 
+.hum-workspace {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(340px, 0.86fr) minmax(420px, 1.14fr);
+  gap: 16px;
+}
+
 .sound-list-panel,
 .editor-panel,
 .reference-panel {
@@ -421,6 +428,119 @@ select {
   font-size: 0.85rem;
 }
 
+.hum-capture-panel,
+.hum-result-panel {
+  min-height: 0;
+}
+
+.capture-meter {
+  overflow: hidden;
+  height: 12px;
+  border: 1px solid rgba(190, 216, 218, 0.22);
+  border-radius: 999px;
+  background: rgba(5, 8, 14, 0.84);
+}
+
+.capture-meter span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #90e0d8, #f5c15c);
+  transition: width 70ms linear;
+}
+
+.pitch-readout,
+.hum-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pitch-readout div,
+.hum-analysis-grid div {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(190, 216, 218, 0.18);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(15, 22, 34, 0.5);
+}
+
+.pitch-readout span,
+.hum-analysis-grid span {
+  color: #8fa0b4;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.pitch-readout strong,
+.hum-analysis-grid strong {
+  min-width: 0;
+  color: #f8fbff;
+  font-size: 1rem;
+}
+
+.pitch-trace {
+  display: flex;
+  align-items: end;
+  gap: 3px;
+  min-height: 220px;
+  border: 1px solid rgba(190, 216, 218, 0.18);
+  border-radius: 8px;
+  padding: 12px;
+  background:
+    linear-gradient(rgba(190, 216, 218, 0.08) 1px, transparent 1px) 0 0 / 100% 25%,
+    rgba(5, 8, 14, 0.54);
+}
+
+.pitch-trace span {
+  flex: 1 1 4px;
+  min-width: 3px;
+  border-radius: 4px 4px 0 0;
+  background: #90e0d8;
+}
+
+.config-preview {
+  overflow: auto;
+  min-height: 260px;
+  margin: 0;
+  border: 1px solid rgba(190, 216, 218, 0.18);
+  border-radius: 8px;
+  padding: 12px;
+  color: #d7e8f3;
+  background: rgba(5, 8, 14, 0.72);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.hum-step-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.hum-step-strip span {
+  display: inline-grid;
+  min-width: 34px;
+  min-height: 32px;
+  place-items: center;
+  border: 1px solid rgba(190, 216, 218, 0.2);
+  border-radius: 7px;
+  color: #f8fbff;
+  background: rgba(5, 8, 14, 0.66);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.hum-step-strip span.is-playing {
+  border-color: rgba(144, 224, 216, 0.74);
+  background: rgba(22, 48, 56, 0.9);
+  box-shadow: 0 0 0 1px rgba(144, 224, 216, 0.36);
+}
+
 .reference-list {
   display: grid;
   gap: 16px;
@@ -467,6 +587,12 @@ select {
 
 @media (max-width: 980px) {
   .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .hum-workspace,
+  .pitch-readout,
+  .hum-analysis-grid {
     grid-template-columns: 1fr;
   }
 

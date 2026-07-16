@@ -6,6 +6,7 @@ Standalone Vite labs for experimenting with Web Audio sound effects and procedur
 
 - `audio-lab.html`: layered one-shot and sustained sound-effect editor.
 - `music-lab.html`: procedural score and pulse-sequencing editor.
+- `hum-lab.html`: Humdinger microphone experiment that turns a hummed phrase into a Music Lab config.
 
 The lab presets live in `src/config/audio.ts` and `src/config/music.ts`. These files are local to this repo, so experiments here are not coupled to Edge of the Drift runtime code.
 
@@ -28,6 +29,7 @@ Open:
 - `http://127.0.0.1:5173/`
 - `http://127.0.0.1:5173/audio-lab.html`
 - `http://127.0.0.1:5173/music-lab.html`
+- `http://127.0.0.1:5173/hum-lab.html`
 
 ## Verification
 

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <link rel="stylesheet" type="text/css" href="/src/audio-lab.css" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Humdinger</title>
+  </head>
+  <body>
+    <main class="audio-lab hum-lab">
+      <header class="app-header">
+        <div>
+          <h1>Humdinger</h1>
+          <p>Hum a short phrase and reshape it into a procedural Music Lab config.</p>
+        </div>
+        <div class="header-actions">
+          <button class="primary-button" id="record-button" type="button">Record Hum</button>
+          <button class="secondary-button" id="retake-button" type="button">Retake</button>
+          <button class="secondary-button" id="play-button" type="button">Play Config</button>
+          <button class="secondary-button" id="copy-button" type="button">Copy Config</button>
+        </div>
+      </header>
+
+      <section class="hum-workspace">
+        <section class="editor-panel hum-capture-panel" aria-labelledby="capture-title">
+          <div class="editor-heading">
+            <div>
+              <h2 id="capture-title">Capture</h2>
+              <p id="capture-summary">Record 3-8 seconds of a clear monophonic hum.</p>
+            </div>
+            <span class="sound-kind" id="capture-status">Ready</span>
+          </div>
+
+          <div class="capture-meter" aria-hidden="true">
+            <span id="level-fill"></span>
+          </div>
+
+          <div class="pitch-readout">
+            <div>
+              <span>Current Pitch</span>
+              <strong id="pitch-value">--</strong>
+            </div>
+            <div>
+              <span>Voiced Samples</span>
+              <strong id="sample-count">0</strong>
+            </div>
+            <div>
+              <span>Capture Time</span>
+              <strong id="capture-time">0.0s</strong>
+            </div>
+          </div>
+
+          <div class="pitch-trace" id="pitch-trace" aria-label="Detected pitch trace"></div>
+          <output class="copy-status" id="copy-status" aria-live="polite"></output>
+        </section>
+
+        <section class="editor-panel hum-result-panel" aria-labelledby="result-title">
+          <div class="editor-heading">
+            <div>
+              <h2 id="result-title">Generated Config</h2>
+              <p id="result-summary">The generated loop will appear after recording.</p>
+            </div>
+            <span class="sound-kind" id="playback-status">Stopped</span>
+          </div>
+
+          <div class="hum-analysis-grid" id="analysis-grid"></div>
+          <pre class="config-preview" id="config-preview"></pre>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/src/humLab.ts"></script>
+  </body>
+</html>
