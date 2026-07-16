@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <link rel="stylesheet" type="text/css" href="/src/audio-lab.css" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web Audio API Music Lab</title>
+  </head>
+  <body>
+    <main class="audio-lab music-lab">
+      <header class="app-header">
+        <div>
+          <h1>Music Lab</h1>
+          <p>Tune procedural score ideas with Web Audio controls.</p>
+        </div>
+        <div class="header-actions">
+          <label class="preset-field" for="example-select">
+            <span>Examples</span>
+            <select id="example-select">
+              <option value="">Choose a techno preset</option>
+            </select>
+          </label>
+          <button class="primary-button" id="play-toggle-button" type="button">Play</button>
+          <button class="secondary-button" id="reset-button" type="button">Reset</button>
+          <button class="secondary-button" id="copy-button" type="button">Copy Config</button>
+        </div>
+      </header>
+
+      <section class="workspace music-workspace">
+        <aside class="sound-list-panel" aria-label="Music sections">
+          <div class="sound-list" id="section-list"></div>
+        </aside>
+
+        <section class="editor-panel" aria-labelledby="editor-title">
+          <div class="editor-heading">
+            <div>
+              <h2 id="editor-title">Score</h2>
+              <p id="editor-summary">Looping preview follows the current draft config.</p>
+            </div>
+            <span class="sound-kind" id="playback-status">Stopped</span>
+          </div>
+
+          <div class="transport-row">
+            <label class="field compact-field" for="master-volume">
+              <span>Master Volume</span>
+              <input id="master-volume" type="range" min="0" max="1" step="0.01" />
+              <span class="range-limits">
+                <span>0</span>
+                <span>1</span>
+              </span>
+            </label>
+            <label class="field compact-field" for="intensity">
+              <span>Intensity</span>
+              <input id="intensity" type="range" min="0" max="1" step="0.01" />
+              <span class="range-limits">
+                <span>0</span>
+                <span>1</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="parameter-grid" id="parameter-grid"></div>
+          <output class="copy-status" id="copy-status" aria-live="polite"></output>
+        </section>
+
+        <aside class="reference-panel" aria-labelledby="reference-title">
+          <h2 id="reference-title">Musical Notes</h2>
+          <div class="reference-list" id="reference-list"></div>
+        </aside>
+      </section>
+    </main>
+
+    <script type="module" src="/src/musicLab.ts"></script>
+  </body>
+</html>
