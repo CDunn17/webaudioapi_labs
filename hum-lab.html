@@ -4,29 +4,51 @@
     <link rel="stylesheet" type="text/css" href="/src/audio-lab.css" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Humdinger</title>
+    <title>Voice Lab</title>
   </head>
   <body>
-    <main class="audio-lab hum-lab">
+    <main class="audio-lab voice-lab">
       <header class="app-header">
         <div>
-          <h1>Humdinger</h1>
-          <p>Hum a short phrase and reshape it into a procedural Music Lab config.</p>
+          <h1>Voice Lab</h1>
+          <p>Describe a sound with your voice, then turn it into editable procedural audio.</p>
         </div>
         <div class="header-actions">
-          <button class="primary-button" id="record-button" type="button">Record Hum</button>
-          <button class="secondary-button" id="retake-button" type="button">Retake</button>
-          <button class="secondary-button" id="play-button" type="button">Play Config</button>
-          <button class="secondary-button" id="copy-button" type="button">Copy Config</button>
+          <button class="primary-button" id="record-button" type="button">Record</button>
+          <button class="secondary-button" id="stop-button" type="button" disabled>Stop</button>
+          <button class="secondary-button" id="clear-button" type="button">Clear</button>
         </div>
       </header>
 
-      <section class="hum-workspace">
-        <section class="editor-panel hum-capture-panel" aria-labelledby="capture-title">
+      <section class="voice-mode-picker" aria-labelledby="mode-title">
+        <div class="voice-section-heading">
+          <div>
+            <h2 id="mode-title">What are you making?</h2>
+            <p>Each mode listens for different information in the same recording.</p>
+          </div>
+        </div>
+        <div class="voice-mode-grid" role="radiogroup" aria-label="Creation mode">
+          <button class="voice-mode-card is-active" data-mode="effect" role="radio" aria-checked="true" type="button">
+            <strong>Sound effect</strong>
+            <span>A crash, hit, power-up, sweep, or other one-shot sound.</span>
+          </button>
+          <button class="voice-mode-card" data-mode="beat" role="radio" aria-checked="false" type="button">
+            <strong>Beat / beatboxing</strong>
+            <span>Repeated vocal hits grouped into rhythmic lanes.</span>
+          </button>
+          <button class="voice-mode-card" data-mode="melody" role="radio" aria-checked="false" type="button">
+            <strong>Melody</strong>
+            <span>A clear lead line converted into timed procedural notes.</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="voice-workspace">
+        <section class="editor-panel voice-capture-panel" aria-labelledby="capture-title">
           <div class="editor-heading">
             <div>
-              <h2 id="capture-title">Capture</h2>
-              <p id="capture-summary">Record 3-8 seconds of a clear monophonic hum.</p>
+              <h2 id="capture-title">Record an effect</h2>
+              <p id="capture-guidance">Make the sound once, including its attack and full decay.</p>
             </div>
             <span class="sound-kind" id="capture-status">Ready</span>
           </div>
@@ -37,38 +59,62 @@
 
           <div class="pitch-readout">
             <div>
-              <span>Current Pitch</span>
-              <strong id="pitch-value">--</strong>
-            </div>
-            <div>
-              <span>Voiced Samples</span>
-              <strong id="sample-count">0</strong>
-            </div>
-            <div>
-              <span>Capture Time</span>
+              <span>Capture time</span>
               <strong id="capture-time">0.0s</strong>
             </div>
+            <div>
+              <span>Input</span>
+              <strong id="input-kind">Microphone</strong>
+            </div>
+            <div>
+              <span>Mode limit</span>
+              <strong id="capture-limit">4s</strong>
+            </div>
           </div>
 
-          <div class="pitch-trace" id="pitch-trace" aria-label="Detected pitch trace"></div>
-          <output class="copy-status" id="copy-status" aria-live="polite"></output>
+          <div class="recording-panel">
+            <div>
+              <strong>Your recording</strong>
+              <span>The recording is available for comparison, but is never included in generated configs.</span>
+            </div>
+            <audio id="recording-playback" controls hidden></audio>
+            <label class="secondary-button file-button" for="recording-file">
+              Use an audio file
+              <input id="recording-file" type="file" accept="audio/*,.m4a" />
+            </label>
+          </div>
+
+          <fieldset class="analysis-engine-picker">
+            <legend>Analysis engines</legend>
+            <label>
+              <input id="engine-web-audio" type="checkbox" value="webAudio" checked />
+              <span><strong>Web Audio + local DSP</strong><small>Small, dependency-free baseline</small></span>
+            </label>
+            <label>
+              <input id="engine-meyda" type="checkbox" value="meyda" checked />
+              <span><strong>Meyda</strong><small>Open-source spectral feature extraction</small></span>
+            </label>
+          </fieldset>
+
+          <div class="transport-row">
+            <button class="primary-button" id="analyze-button" type="button" disabled>Generate configs</button>
+          </div>
+          <output class="copy-status" id="capture-message" aria-live="polite"></output>
         </section>
 
-        <section class="editor-panel hum-result-panel" aria-labelledby="result-title">
-          <div class="editor-heading">
+        <section class="voice-results-panel" aria-labelledby="results-title">
+          <div class="voice-section-heading">
             <div>
-              <h2 id="result-title">Generated Config</h2>
-              <p id="result-summary">The generated loop will appear after recording.</p>
+              <h2 id="results-title">Procedural results</h2>
+              <p id="results-summary">Record or choose audio to compare generated configs.</p>
             </div>
-            <span class="sound-kind" id="playback-status">Stopped</span>
+            <span class="sound-kind" id="result-status">Waiting</span>
           </div>
-
-          <div class="hum-analysis-grid" id="analysis-grid"></div>
-          <pre class="config-preview" id="config-preview"></pre>
+          <div class="voice-results" id="voice-results"></div>
         </section>
       </section>
     </main>
 
-    <script type="module" src="/src/humLab.ts"></script>
+    <script type="module" src="/src/voiceLab.ts"></script>
   </body>
 </html>

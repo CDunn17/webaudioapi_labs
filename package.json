@@ -5,6 +5,7 @@
   "license": "BSD-3-Clause",
   "type": "module",
   "scripts": {
+    "audio-lab": "vite --host 127.0.0.1",
     "build": "vite build",
     "dev": "vite --host 127.0.0.1",
     "lint": "eslint 'src/**/*.ts'",
@@ -19,5 +20,8 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.59.4",
     "vite": "^7.3.2"
+  },
+  "dependencies": {
+    "meyda": "^5.6.3"
   }
 }

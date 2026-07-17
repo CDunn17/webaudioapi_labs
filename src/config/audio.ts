@@ -32,6 +32,18 @@ export type ProcessorConfig = {
   kind: 'reserved';
 };
 
+export type AutomationPoint = {
+  timeMs: number;
+  value: number;
+};
+
+export type LayerAutomationConfig = {
+  // Gain values are normalized multipliers; frequency values are absolute Hz.
+  filterFrequency?: AutomationPoint[];
+  frequency?: AutomationPoint[];
+  gain?: AutomationPoint[];
+};
+
 export type ChargeModulationConfig = {
   filterFrequency?: number;
   frequency?: number;
@@ -41,10 +53,12 @@ export type ChargeModulationConfig = {
 };
 
 export type LayerBase = {
+  automation?: LayerAutomationConfig;
   enabled: boolean;
   id: string;
   name: string;
   processors: ProcessorConfig[];
+  startMs?: number;
 };
 
 export type ToneLayerConfig = LayerBase & {
@@ -356,4 +370,3 @@ export const GAME_AUDIO: GameAudioConfig = {
     filterFrequency: 2_000,
   },
 };
-

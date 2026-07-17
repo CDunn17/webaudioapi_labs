@@ -1,5 +1,7 @@
 import {
   GAME_AUDIO,
+  type AutomationPoint,
+  type LayerAutomationConfig,
   type NoiseSoundConfig,
   type OneShotSoundConfig,
   type SustainedAudioConfig,
@@ -33,10 +35,12 @@ type ChargeModulationConfig = {
 };
 
 type LayerBase = {
+  automation?: LayerAutomationConfig;
   enabled: boolean;
   id: string;
   name: string;
   processors: ProcessorConfig[];
+  startMs?: number;
 };
 
 type ToneLayerConfig = LayerBase & {
@@ -212,6 +216,23 @@ const fmSustained = (
   config: FmSustainedSoundConfig
 ): FmSustainedSoundConfig => ({ ...config });
 
+const cloneAutomation = (
+  automation: LayerAutomationConfig | undefined
+): LayerAutomationConfig | undefined => {
+  if (automation === undefined) return undefined;
+  const cloned: LayerAutomationConfig = {};
+  if (automation.filterFrequency !== undefined) {
+    cloned.filterFrequency = automation.filterFrequency.map((point) => ({ ...point }));
+  }
+  if (automation.frequency !== undefined) {
+    cloned.frequency = automation.frequency.map((point) => ({ ...point }));
+  }
+  if (automation.gain !== undefined) {
+    cloned.gain = automation.gain.map((point) => ({ ...point }));
+  }
+  return cloned;
+};
+
 const toneLayer = (
   id: string,
   name: string,
@@ -304,16 +325,24 @@ const fmSustainedLayer = (
 });
 
 const cloneLayer = (layer: SoundLayerConfig): SoundLayerConfig => {
+  const withTimeline = <Layer extends SoundLayerConfig>(clonedLayer: Layer): Layer => {
+    clonedLayer.enabled = layer.enabled;
+    clonedLayer.processors = [...layer.processors];
+    if (layer.startMs !== undefined) clonedLayer.startMs = layer.startMs;
+    const automation = cloneAutomation(layer.automation);
+    if (automation !== undefined) clonedLayer.automation = automation;
+    return clonedLayer;
+  };
   if (layer.kind === 'tone') {
-    return toneLayer(layer.id, layer.name, layer.sound);
+    return withTimeline(toneLayer(layer.id, layer.name, layer.sound));
   }
   if (layer.kind === 'noise') {
-    return noiseLayer(layer.id, layer.name, layer.sound);
+    return withTimeline(noiseLayer(layer.id, layer.name, layer.sound));
   }
   if (layer.kind === 'click') {
-    return clickLayer(layer.id, layer.name, layer.sound);
+    return withTimeline(clickLayer(layer.id, layer.name, layer.sound));
   }
-  return fmToneLayer(layer.id, layer.name, layer.sound);
+  return withTimeline(fmToneLayer(layer.id, layer.name, layer.sound));
 };
 
 const cloneSustainedLayer = (
@@ -879,83 +908,144 @@ class LabAudio {
     return audioContext.state === 'running' ? audioContext : undefined;
   }
 
-  private playTone(sound: ToneSoundConfig): void {
+  private playTone(
+    sound: ToneSoundConfig,
+    startAt?: number,
+    automation?: LayerAutomationConfig
+  ): void {
     const audioContext = this.context();
     const destination = this.destination();
     if (audioContext === undefined || destination === undefined) return;
 
-    const now = audioContext.currentTime;
+    const now = startAt ?? audioContext.currentTime;
     const duration = sound.durationMs / 1000;
     const attack = sound.attackMs / 1000;
     const releaseStart = Math.max(attack, duration - sound.releaseMs / 1000);
     const oscillator = audioContext.createOscillator();
     const gain = audioContext.createGain();
     oscillator.type = sound.type;
-    oscillator.frequency.setValueAtTime(sound.frequencyStart, now);
-    oscillator.frequency.linearRampToValueAtTime(sound.frequencyEnd, now + duration);
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(sound.volume, now + attack);
-    gain.gain.setValueAtTime(sound.volume, now + releaseStart);
-    gain.gain.linearRampToValueAtTime(0, now + duration);
-    this.connectOutput(audioContext, oscillator, gain, sound.filterFrequency);
+    this.scheduleParameter(
+      oscillator.frequency,
+      automation?.frequency,
+      now,
+      sound.durationMs,
+      sound.frequencyStart,
+      sound.frequencyEnd
+    );
+    this.scheduleEnvelope(
+      gain.gain,
+      automation?.gain,
+      now,
+      sound.durationMs,
+      sound.volume,
+      attack,
+      releaseStart
+    );
+    this.connectOutput(
+      audioContext,
+      oscillator,
+      gain,
+      sound.filterFrequency,
+      automation?.filterFrequency,
+      now,
+      sound.durationMs
+    );
     gain.connect(destination);
     oscillator.start(now);
     oscillator.stop(now + duration + 0.03);
     this.trackOneShot({ gain, source: oscillator });
   }
 
-  private playNoise(sound: NoiseSoundConfig): void {
+  private playNoise(
+    sound: NoiseSoundConfig,
+    startAt?: number,
+    automation?: LayerAutomationConfig
+  ): void {
     const audioContext = this.context();
     const destination = this.destination();
     if (audioContext === undefined || destination === undefined) return;
 
-    const now = audioContext.currentTime;
+    const now = startAt ?? audioContext.currentTime;
     const duration = sound.durationMs / 1000;
     const attack = sound.attackMs / 1000;
     const releaseStart = Math.max(attack, duration - sound.releaseMs / 1000);
     const source = audioContext.createBufferSource();
     const gain = audioContext.createGain();
     source.buffer = this.noise(audioContext);
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(sound.volume, now + attack);
-    gain.gain.setValueAtTime(sound.volume, now + releaseStart);
-    gain.gain.linearRampToValueAtTime(0, now + duration);
-    this.connectOutput(audioContext, source, gain, sound.filterFrequency);
+    this.scheduleEnvelope(
+      gain.gain,
+      automation?.gain,
+      now,
+      sound.durationMs,
+      sound.volume,
+      attack,
+      releaseStart
+    );
+    this.connectOutput(
+      audioContext,
+      source,
+      gain,
+      sound.filterFrequency,
+      automation?.filterFrequency,
+      now,
+      sound.durationMs
+    );
     gain.connect(destination);
     source.start(now);
     source.stop(now + duration + 0.03);
     this.trackOneShot({ gain, source });
   }
 
-  private playClick(sound: NoiseSoundConfig): void {
+  private playClick(
+    sound: NoiseSoundConfig,
+    startAt?: number,
+    automation?: LayerAutomationConfig
+  ): void {
     const audioContext = this.context();
     const destination = this.destination();
     if (audioContext === undefined || destination === undefined) return;
 
-    const now = audioContext.currentTime;
+    const now = startAt ?? audioContext.currentTime;
     const duration = sound.durationMs / 1000;
     const attack = sound.attackMs / 1000;
     const releaseStart = Math.max(attack, duration - sound.releaseMs / 1000);
     const source = audioContext.createBufferSource();
     const gain = audioContext.createGain();
     source.buffer = this.click(audioContext);
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(sound.volume, now + attack);
-    gain.gain.setValueAtTime(sound.volume, now + releaseStart);
-    gain.gain.linearRampToValueAtTime(0, now + duration);
-    this.connectOutput(audioContext, source, gain, sound.filterFrequency);
+    this.scheduleEnvelope(
+      gain.gain,
+      automation?.gain,
+      now,
+      sound.durationMs,
+      sound.volume,
+      attack,
+      releaseStart
+    );
+    this.connectOutput(
+      audioContext,
+      source,
+      gain,
+      sound.filterFrequency,
+      automation?.filterFrequency,
+      now,
+      sound.durationMs
+    );
     gain.connect(destination);
     source.start(now);
     source.stop(now + duration + 0.03);
     this.trackOneShot({ gain, source });
   }
 
-  private playFmTone(sound: FmToneSoundConfig): void {
+  private playFmTone(
+    sound: FmToneSoundConfig,
+    startAt?: number,
+    automation?: LayerAutomationConfig
+  ): void {
     const audioContext = this.context();
     const destination = this.destination();
     if (audioContext === undefined || destination === undefined) return;
 
-    const now = audioContext.currentTime;
+    const now = startAt ?? audioContext.currentTime;
     const duration = sound.durationMs / 1000;
     const attack = sound.attackMs / 1000;
     const releaseStart = Math.max(attack, duration - sound.releaseMs / 1000);
@@ -964,18 +1054,37 @@ class LabAudio {
     const modulationGain = audioContext.createGain();
     const gain = audioContext.createGain();
     carrier.type = sound.carrierType;
-    carrier.frequency.setValueAtTime(sound.frequencyStart, now);
-    carrier.frequency.linearRampToValueAtTime(sound.frequencyEnd, now + duration);
+    this.scheduleParameter(
+      carrier.frequency,
+      automation?.frequency,
+      now,
+      sound.durationMs,
+      sound.frequencyStart,
+      sound.frequencyEnd
+    );
     modulator.type = sound.modulatorType;
     modulator.frequency.setValueAtTime(sound.modulatorFrequency, now);
     modulationGain.gain.setValueAtTime(sound.modulationDepth, now);
     modulator.connect(modulationGain);
     modulationGain.connect(carrier.frequency);
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(sound.volume, now + attack);
-    gain.gain.setValueAtTime(sound.volume, now + releaseStart);
-    gain.gain.linearRampToValueAtTime(0, now + duration);
-    this.connectOutput(audioContext, carrier, gain, sound.filterFrequency);
+    this.scheduleEnvelope(
+      gain.gain,
+      automation?.gain,
+      now,
+      sound.durationMs,
+      sound.volume,
+      attack,
+      releaseStart
+    );
+    this.connectOutput(
+      audioContext,
+      carrier,
+      gain,
+      sound.filterFrequency,
+      automation?.filterFrequency,
+      now,
+      sound.durationMs
+    );
     gain.connect(destination);
     carrier.start(now);
     modulator.start(now);
@@ -987,13 +1096,15 @@ class LabAudio {
 
   private playLayered(sound: LayeredSoundConfig): number {
     let playedLayerCount = 0;
+    const baseStart = this.context()?.currentTime ?? 0;
     for (const layer of sound.layers) {
       if (!layer.enabled) continue;
+      const startAt = baseStart + Math.max(0, layer.startMs ?? 0) / 1000;
 
-      if (layer.kind === 'tone') this.playTone(layer.sound);
-      if (layer.kind === 'noise') this.playNoise(layer.sound);
-      if (layer.kind === 'click') this.playClick(layer.sound);
-      if (layer.kind === 'fmTone') this.playFmTone(layer.sound);
+      if (layer.kind === 'tone') this.playTone(layer.sound, startAt, layer.automation);
+      if (layer.kind === 'noise') this.playNoise(layer.sound, startAt, layer.automation);
+      if (layer.kind === 'click') this.playClick(layer.sound, startAt, layer.automation);
+      if (layer.kind === 'fmTone') this.playFmTone(layer.sound, startAt, layer.automation);
       playedLayerCount += 1;
     }
     return playedLayerCount;
@@ -1135,7 +1246,10 @@ class LabAudio {
     audioContext: AudioContext,
     source: AudioNode,
     gain: GainNode,
-    filterFrequency: number | undefined
+    filterFrequency: number | undefined,
+    filterCurve?: AutomationPoint[],
+    startAt = audioContext.currentTime,
+    durationMs = 0
   ): void {
     if (filterFrequency === undefined) {
       source.connect(gain);
@@ -1144,9 +1258,67 @@ class LabAudio {
 
     const filter = audioContext.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = filterFrequency;
+    this.scheduleParameter(
+      filter.frequency,
+      filterCurve,
+      startAt,
+      durationMs,
+      filterFrequency,
+      filterFrequency
+    );
     source.connect(filter);
     filter.connect(gain);
+  }
+
+  private scheduleEnvelope(
+    parameter: AudioParam,
+    curve: AutomationPoint[] | undefined,
+    startAt: number,
+    durationMs: number,
+    volume: number,
+    attackSeconds: number,
+    releaseStartSeconds: number
+  ): void {
+    const endAt = startAt + durationMs / 1000;
+    parameter.setValueAtTime(0, startAt);
+    if (curve !== undefined && curve.length > 0) {
+      for (const point of curve) {
+        const time = startAt + Math.min(durationMs, Math.max(0, point.timeMs)) / 1000;
+        const value = Math.max(0, point.value * volume);
+        if (time === startAt) parameter.setValueAtTime(value, time);
+        else parameter.linearRampToValueAtTime(value, time);
+      }
+      return;
+    }
+    parameter.linearRampToValueAtTime(volume, startAt + attackSeconds);
+    parameter.setValueAtTime(volume, startAt + releaseStartSeconds);
+    parameter.linearRampToValueAtTime(0, endAt);
+  }
+
+  private scheduleParameter(
+    parameter: AudioParam,
+    curve: AutomationPoint[] | undefined,
+    startAt: number,
+    durationMs: number,
+    startValue: number,
+    endValue: number
+  ): void {
+    parameter.setValueAtTime(Math.max(0.0001, startValue), startAt);
+    if (curve === undefined || curve.length === 0) {
+      if (durationMs > 0) {
+        parameter.linearRampToValueAtTime(
+          Math.max(0.0001, endValue),
+          startAt + durationMs / 1000
+        );
+      }
+      return;
+    }
+    for (const point of curve) {
+      const time = startAt + Math.min(durationMs, Math.max(0, point.timeMs)) / 1000;
+      const value = Math.max(0.0001, point.value);
+      if (time === startAt) parameter.setValueAtTime(value, time);
+      else parameter.linearRampToValueAtTime(value, time);
+    }
   }
 
   private trackOneShot(handle: OneShotHandle): void {
@@ -1234,7 +1406,7 @@ if (
 masterVolume.value = `${GAME_AUDIO.masterVolume}`;
 
 const layerDurationMs = (layer: SoundLayerConfig): number =>
-  layer.sound.durationMs;
+  Math.max(0, layer.startMs ?? 0) + layer.sound.durationMs;
 
 const oneShotDurationMs = (sound: LayeredDefinition): number => {
   const durations = sound.draft.layers
