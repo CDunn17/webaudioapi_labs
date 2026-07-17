@@ -48,6 +48,7 @@ export type BeatVoice = {
 };
 
 export type BeatLane = {
+  hits: Array<{ label: string; startMs: number; velocity: number }>;
   label: string;
   steps: number[];
   voice: BeatVoice;
@@ -55,6 +56,7 @@ export type BeatLane = {
 
 export type BeatConfig = {
   bpm: number;
+  durationMs: number;
   lanes: BeatLane[];
   masterVolume: number;
   stepCount: number;
@@ -83,6 +85,11 @@ type ProceduralResultBase = {
 
 export type EffectResult = ProceduralResultBase & {
   config: LayeredSoundConfig;
+  fit?: {
+    candidateCount: number;
+    finalLoss: number;
+    improvement: number;
+  };
   mode: 'effect';
 };
 

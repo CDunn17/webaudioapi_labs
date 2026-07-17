@@ -95,11 +95,50 @@ export type FmToneLayerConfig = LayerBase & {
   sound: FmToneSoundConfig;
 };
 
+export type ResonanceConfig = {
+  decayMs: number;
+  frequency: number;
+  gain: number;
+};
+
+export type ResonatorBankSoundConfig = {
+  attackMs: number;
+  durationMs: number;
+  filterFrequency?: number;
+  releaseMs: number;
+  resonances: ResonanceConfig[];
+  volume: number;
+};
+
+export type ResonatorBankLayerConfig = LayerBase & {
+  kind: 'resonatorBank';
+  sound: ResonatorBankSoundConfig;
+};
+
+export type ImpulseClusterSoundConfig = {
+  count: number;
+  decayMs: number;
+  durationMs: number;
+  filterFrequency: number;
+  maxFrequency: number;
+  minFrequency: number;
+  seed: number;
+  spreadMs: number;
+  volume: number;
+};
+
+export type ImpulseClusterLayerConfig = LayerBase & {
+  kind: 'impulseCluster';
+  sound: ImpulseClusterSoundConfig;
+};
+
 export type SoundLayerConfig =
   | ToneLayerConfig
   | NoiseLayerConfig
   | ClickLayerConfig
-  | FmToneLayerConfig;
+  | FmToneLayerConfig
+  | ResonatorBankLayerConfig
+  | ImpulseClusterLayerConfig;
 
 export type LayeredSoundConfig = {
   layers: SoundLayerConfig[];

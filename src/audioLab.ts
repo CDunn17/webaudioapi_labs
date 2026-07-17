@@ -1,13 +1,16 @@
 import {
   GAME_AUDIO,
   type AutomationPoint,
+  type ImpulseClusterSoundConfig,
   type LayerAutomationConfig,
   type NoiseSoundConfig,
   type OneShotSoundConfig,
+  type ResonatorBankSoundConfig,
   type SustainedAudioConfig,
   type SustainedSoundConfig,
   type ToneSoundConfig,
 } from './config/audio';
+import { renderEffectLayers } from './voice/effectRenderer';
 
 type SoundId =
   | 'thrust'
@@ -77,6 +80,16 @@ type FmToneLayerConfig = LayerBase & {
   sound: FmToneSoundConfig;
 };
 
+type ResonatorBankLayerConfig = LayerBase & {
+  kind: 'resonatorBank';
+  sound: ResonatorBankSoundConfig;
+};
+
+type ImpulseClusterLayerConfig = LayerBase & {
+  kind: 'impulseCluster';
+  sound: ImpulseClusterSoundConfig;
+};
+
 type SustainedNoiseSoundConfig = {
   volume: number;
   attackMs: number;
@@ -119,7 +132,9 @@ type SoundLayerConfig =
   | ToneLayerConfig
   | NoiseLayerConfig
   | ClickLayerConfig
-  | FmToneLayerConfig;
+  | FmToneLayerConfig
+  | ResonatorBankLayerConfig
+  | ImpulseClusterLayerConfig;
 
 type SustainedLayerConfig =
   | (SustainedToneLayerConfig & { chargeModulation?: ChargeModulationConfig })
@@ -157,16 +172,23 @@ type SoundDefinition = LayeredDefinition | SustainedDefinition;
 type NumericField = {
   key:
     | 'attackMs'
+    | 'count'
+    | 'decayMs'
     | 'durationMs'
     | 'filterFrequency'
     | 'frequency'
     | 'frequencyEnd'
     | 'frequencyStart'
+    | 'gain'
     | 'modulationDepth'
     | 'modulatorFrequency'
+    | 'maxFrequency'
+    | 'minFrequency'
     | 'pulseDepth'
     | 'pulseFrequency'
     | 'releaseMs'
+    | 'seed'
+    | 'spreadMs'
     | 'volume';
   label: string;
   maximum: number;
@@ -185,22 +207,19 @@ type ReferenceKey =
   | 'click'
   | 'fmSustained'
   | 'fmTone'
+  | 'impulseCluster'
   | 'layers'
   | 'noise'
   | 'processors'
   | 'sustainedNoise'
   | 'sustainedTone'
   | 'tone'
+  | 'resonatorBank'
   | 'type';
 
 type SustainedHandle = {
   gain: GainNode;
   sources: AudioScheduledSourceNode[];
-};
-
-type OneShotHandle = {
-  gain: GainNode;
-  source: AudioScheduledSourceNode;
 };
 
 const tone = (config: ToneSoundConfig): ToneSoundConfig => ({ ...config });
@@ -209,6 +228,15 @@ const sustained = (
   config: SustainedSoundConfig
 ): SustainedSoundConfig => ({ ...config });
 const fmTone = (config: FmToneSoundConfig): FmToneSoundConfig => ({ ...config });
+const resonatorBank = (
+  config: ResonatorBankSoundConfig
+): ResonatorBankSoundConfig => ({
+  ...config,
+  resonances: config.resonances.map((resonance) => ({ ...resonance })),
+});
+const impulseCluster = (
+  config: ImpulseClusterSoundConfig
+): ImpulseClusterSoundConfig => ({ ...config });
 const sustainedNoise = (
   config: SustainedNoiseSoundConfig
 ): SustainedNoiseSoundConfig => ({ ...config });
@@ -285,6 +313,32 @@ const fmToneLayer = (
   sound: fmTone(sound),
 });
 
+const resonatorBankLayer = (
+  id: string,
+  name: string,
+  sound: ResonatorBankSoundConfig
+): ResonatorBankLayerConfig => ({
+  enabled: true,
+  id,
+  kind: 'resonatorBank',
+  name,
+  processors: [],
+  sound: resonatorBank(sound),
+});
+
+const impulseClusterLayer = (
+  id: string,
+  name: string,
+  sound: ImpulseClusterSoundConfig
+): ImpulseClusterLayerConfig => ({
+  enabled: true,
+  id,
+  kind: 'impulseCluster',
+  name,
+  processors: [],
+  sound: impulseCluster(sound),
+});
+
 const sustainedToneLayer = (
   id: string,
   name: string,
@@ -342,7 +396,13 @@ const cloneLayer = (layer: SoundLayerConfig): SoundLayerConfig => {
   if (layer.kind === 'click') {
     return withTimeline(clickLayer(layer.id, layer.name, layer.sound));
   }
-  return withTimeline(fmToneLayer(layer.id, layer.name, layer.sound));
+  if (layer.kind === 'fmTone') {
+    return withTimeline(fmToneLayer(layer.id, layer.name, layer.sound));
+  }
+  if (layer.kind === 'resonatorBank') {
+    return withTimeline(resonatorBankLayer(layer.id, layer.name, layer.sound));
+  }
+  return withTimeline(impulseClusterLayer(layer.id, layer.name, layer.sound));
 };
 
 const cloneSustainedLayer = (
@@ -612,6 +672,14 @@ const fieldInfo: Record<ReferenceKey, FieldInfo> = {
     description:
       'How long the sound takes to fade in. Tiny values feel clicky and immediate; longer values feel softer.',
   },
+  count: {
+    title: 'Impulse Count',
+    description: 'Number of short, procedurally scattered impacts in the cluster.',
+  },
+  decayMs: {
+    title: 'Impulse Decay',
+    description: 'Approximate tail length of each scattered impulse.',
+  },
   durationMs: {
     title: 'Duration',
     description:
@@ -636,6 +704,10 @@ const fieldInfo: Record<ReferenceKey, FieldInfo> = {
     title: 'Start Frequency',
     description: 'Initial pitch of a one-shot oscillator sweep.',
   },
+  gain: {
+    title: 'Resonance Gain',
+    description: 'Relative strength of one frequency in a resonator bank.',
+  },
   click: {
     title: 'Click Layer',
     description:
@@ -651,6 +723,11 @@ const fieldInfo: Record<ReferenceKey, FieldInfo> = {
     description:
       'A carrier oscillator whose pitch is pushed by a modulator oscillator. Useful for metallic, electric, or sparkling tones.',
   },
+  impulseCluster: {
+    title: 'Impulse Cluster Layer',
+    description:
+      'A repeatable cloud of tiny filtered impacts. Useful for shards, debris, crackle, and secondary collisions.',
+  },
   fmSustained: {
     title: 'FM Sustained Layer',
     description:
@@ -665,6 +742,14 @@ const fieldInfo: Record<ReferenceKey, FieldInfo> = {
     title: 'Modulation Depth',
     description:
       'How strongly the FM modulator bends the carrier pitch. Higher values sound more metallic or unstable.',
+  },
+  maxFrequency: {
+    title: 'Maximum Frequency',
+    description: 'Upper edge of the random impulse frequency range.',
+  },
+  minFrequency: {
+    title: 'Minimum Frequency',
+    description: 'Lower edge of the random impulse frequency range.',
   },
   modulatorFrequency: {
     title: 'Modulator Frequency',
@@ -694,6 +779,19 @@ const fieldInfo: Record<ReferenceKey, FieldInfo> = {
     title: 'Release',
     description:
       'How long the sound takes to fade out. Longer releases leave a tail.',
+  },
+  resonatorBank: {
+    title: 'Resonator Bank Layer',
+    description:
+      'A set of independently decaying sine resonances for glass, metal, shells, and other ringing materials.',
+  },
+  seed: {
+    title: 'Random Seed',
+    description: 'Keeps an impulse cluster repeatable while changing its exact pattern.',
+  },
+  spreadMs: {
+    title: 'Cluster Spread',
+    description: 'Time window over which the impulses are scattered.',
   },
   type: {
     title: 'Oscillator Type',
@@ -752,6 +850,26 @@ const fmToneFields: NumericField[] = [
   { key: 'filterFrequency', label: 'Filter Frequency', minimum: 80, maximum: 8000, step: 10 },
 ];
 
+const resonatorBankFields: NumericField[] = [
+  { key: 'volume', label: 'Volume', minimum: 0, maximum: 0.5, step: 0.01 },
+  { key: 'durationMs', label: 'Duration', minimum: 20, maximum: 4000, step: 5 },
+  { key: 'attackMs', label: 'Attack', minimum: 0, maximum: 300, step: 1 },
+  { key: 'releaseMs', label: 'Release', minimum: 0, maximum: 3600, step: 5 },
+  { key: 'filterFrequency', label: 'Filter Frequency', minimum: 80, maximum: 18000, step: 10 },
+];
+
+const impulseClusterFields: NumericField[] = [
+  { key: 'count', label: 'Impulse Count', minimum: 1, maximum: 64, step: 1 },
+  { key: 'spreadMs', label: 'Cluster Spread', minimum: 0, maximum: 3000, step: 5 },
+  { key: 'decayMs', label: 'Impulse Decay', minimum: 8, maximum: 1200, step: 2 },
+  { key: 'durationMs', label: 'Duration', minimum: 20, maximum: 4000, step: 5 },
+  { key: 'minFrequency', label: 'Minimum Frequency', minimum: 80, maximum: 16000, step: 10 },
+  { key: 'maxFrequency', label: 'Maximum Frequency', minimum: 80, maximum: 18000, step: 10 },
+  { key: 'filterFrequency', label: 'Filter Frequency', minimum: 80, maximum: 18000, step: 10 },
+  { key: 'volume', label: 'Volume', minimum: 0, maximum: 0.5, step: 0.01 },
+  { key: 'seed', label: 'Random Seed', minimum: 1, maximum: 2147483647, step: 1 },
+];
+
 const sustainedFields: NumericField[] = [
   { key: 'frequency', label: 'Frequency', minimum: 20, maximum: 1200, step: 1 },
   { key: 'volume', label: 'Volume', minimum: 0, maximum: 0.5, step: 0.01 },
@@ -786,9 +904,8 @@ const fmSustainedFields: NumericField[] = [
 class LabAudio {
   private audioContext: AudioContext | undefined;
   private masterGain: GainNode | undefined;
-  private clickBuffer: AudioBuffer | undefined;
   private noiseBuffer: AudioBuffer | undefined;
-  private oneShotHandles: OneShotHandle[] = [];
+  private renderedSources: AudioScheduledSourceNode[] = [];
   private sustainedHandles: SustainedHandle[] = [];
 
   setMasterVolume(volume: number): void {
@@ -826,16 +943,14 @@ class LabAudio {
     if (audioContext === undefined) return;
 
     const stopAt = audioContext.currentTime + 0.08;
-    for (const handle of this.oneShotHandles) {
-      handle.gain.gain.cancelScheduledValues(audioContext.currentTime);
-      handle.gain.gain.setTargetAtTime(0, audioContext.currentTime, 0.02);
+    for (const source of this.renderedSources) {
       try {
-        handle.source.stop(stopAt);
+        source.stop(stopAt);
       } catch {
         // Already stopped sounds are harmless here.
       }
     }
-    this.oneShotHandles = [];
+    this.renderedSources = [];
 
     for (const handle of this.sustainedHandles) {
       handle.gain.gain.cancelScheduledValues(audioContext.currentTime);
@@ -855,9 +970,8 @@ class LabAudio {
     const audioContext = this.audioContext;
     this.audioContext = undefined;
     this.masterGain = undefined;
-    this.clickBuffer = undefined;
     this.noiseBuffer = undefined;
-    this.oneShotHandles = [];
+    this.renderedSources = [];
     this.sustainedHandles = [];
     if (audioContext === undefined || audioContext.state === 'closed') return;
 
@@ -870,9 +984,8 @@ class LabAudio {
     if (this.audioContext?.state === 'closed') {
       this.audioContext = undefined;
       this.masterGain = undefined;
-      this.clickBuffer = undefined;
       this.noiseBuffer = undefined;
-      this.oneShotHandles = [];
+      this.renderedSources = [];
       this.sustainedHandles = [];
     }
 
@@ -908,206 +1021,19 @@ class LabAudio {
     return audioContext.state === 'running' ? audioContext : undefined;
   }
 
-  private playTone(
-    sound: ToneSoundConfig,
-    startAt?: number,
-    automation?: LayerAutomationConfig
-  ): void {
-    const audioContext = this.context();
-    const destination = this.destination();
-    if (audioContext === undefined || destination === undefined) return;
-
-    const now = startAt ?? audioContext.currentTime;
-    const duration = sound.durationMs / 1000;
-    const attack = sound.attackMs / 1000;
-    const releaseStart = Math.max(attack, duration - sound.releaseMs / 1000);
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.type = sound.type;
-    this.scheduleParameter(
-      oscillator.frequency,
-      automation?.frequency,
-      now,
-      sound.durationMs,
-      sound.frequencyStart,
-      sound.frequencyEnd
-    );
-    this.scheduleEnvelope(
-      gain.gain,
-      automation?.gain,
-      now,
-      sound.durationMs,
-      sound.volume,
-      attack,
-      releaseStart
-    );
-    this.connectOutput(
-      audioContext,
-      oscillator,
-      gain,
-      sound.filterFrequency,
-      automation?.filterFrequency,
-      now,
-      sound.durationMs
-    );
-    gain.connect(destination);
-    oscillator.start(now);
-    oscillator.stop(now + duration + 0.03);
-    this.trackOneShot({ gain, source: oscillator });
-  }
-
-  private playNoise(
-    sound: NoiseSoundConfig,
-    startAt?: number,
-    automation?: LayerAutomationConfig
-  ): void {
-    const audioContext = this.context();
-    const destination = this.destination();
-    if (audioContext === undefined || destination === undefined) return;
-
-    const now = startAt ?? audioContext.currentTime;
-    const duration = sound.durationMs / 1000;
-    const attack = sound.attackMs / 1000;
-    const releaseStart = Math.max(attack, duration - sound.releaseMs / 1000);
-    const source = audioContext.createBufferSource();
-    const gain = audioContext.createGain();
-    source.buffer = this.noise(audioContext);
-    this.scheduleEnvelope(
-      gain.gain,
-      automation?.gain,
-      now,
-      sound.durationMs,
-      sound.volume,
-      attack,
-      releaseStart
-    );
-    this.connectOutput(
-      audioContext,
-      source,
-      gain,
-      sound.filterFrequency,
-      automation?.filterFrequency,
-      now,
-      sound.durationMs
-    );
-    gain.connect(destination);
-    source.start(now);
-    source.stop(now + duration + 0.03);
-    this.trackOneShot({ gain, source });
-  }
-
-  private playClick(
-    sound: NoiseSoundConfig,
-    startAt?: number,
-    automation?: LayerAutomationConfig
-  ): void {
-    const audioContext = this.context();
-    const destination = this.destination();
-    if (audioContext === undefined || destination === undefined) return;
-
-    const now = startAt ?? audioContext.currentTime;
-    const duration = sound.durationMs / 1000;
-    const attack = sound.attackMs / 1000;
-    const releaseStart = Math.max(attack, duration - sound.releaseMs / 1000);
-    const source = audioContext.createBufferSource();
-    const gain = audioContext.createGain();
-    source.buffer = this.click(audioContext);
-    this.scheduleEnvelope(
-      gain.gain,
-      automation?.gain,
-      now,
-      sound.durationMs,
-      sound.volume,
-      attack,
-      releaseStart
-    );
-    this.connectOutput(
-      audioContext,
-      source,
-      gain,
-      sound.filterFrequency,
-      automation?.filterFrequency,
-      now,
-      sound.durationMs
-    );
-    gain.connect(destination);
-    source.start(now);
-    source.stop(now + duration + 0.03);
-    this.trackOneShot({ gain, source });
-  }
-
-  private playFmTone(
-    sound: FmToneSoundConfig,
-    startAt?: number,
-    automation?: LayerAutomationConfig
-  ): void {
-    const audioContext = this.context();
-    const destination = this.destination();
-    if (audioContext === undefined || destination === undefined) return;
-
-    const now = startAt ?? audioContext.currentTime;
-    const duration = sound.durationMs / 1000;
-    const attack = sound.attackMs / 1000;
-    const releaseStart = Math.max(attack, duration - sound.releaseMs / 1000);
-    const carrier = audioContext.createOscillator();
-    const modulator = audioContext.createOscillator();
-    const modulationGain = audioContext.createGain();
-    const gain = audioContext.createGain();
-    carrier.type = sound.carrierType;
-    this.scheduleParameter(
-      carrier.frequency,
-      automation?.frequency,
-      now,
-      sound.durationMs,
-      sound.frequencyStart,
-      sound.frequencyEnd
-    );
-    modulator.type = sound.modulatorType;
-    modulator.frequency.setValueAtTime(sound.modulatorFrequency, now);
-    modulationGain.gain.setValueAtTime(sound.modulationDepth, now);
-    modulator.connect(modulationGain);
-    modulationGain.connect(carrier.frequency);
-    this.scheduleEnvelope(
-      gain.gain,
-      automation?.gain,
-      now,
-      sound.durationMs,
-      sound.volume,
-      attack,
-      releaseStart
-    );
-    this.connectOutput(
-      audioContext,
-      carrier,
-      gain,
-      sound.filterFrequency,
-      automation?.filterFrequency,
-      now,
-      sound.durationMs
-    );
-    gain.connect(destination);
-    carrier.start(now);
-    modulator.start(now);
-    carrier.stop(now + duration + 0.03);
-    modulator.stop(now + duration + 0.03);
-    this.trackOneShot({ gain, source: carrier });
-    this.trackOneShot({ gain, source: modulator });
-  }
-
   private playLayered(sound: LayeredSoundConfig): number {
-    let playedLayerCount = 0;
-    const baseStart = this.context()?.currentTime ?? 0;
-    for (const layer of sound.layers) {
-      if (!layer.enabled) continue;
-      const startAt = baseStart + Math.max(0, layer.startMs ?? 0) / 1000;
+    const audioContext = this.context();
+    const destination = this.destination();
+    if (audioContext === undefined || destination === undefined) return 0;
 
-      if (layer.kind === 'tone') this.playTone(layer.sound, startAt, layer.automation);
-      if (layer.kind === 'noise') this.playNoise(layer.sound, startAt, layer.automation);
-      if (layer.kind === 'click') this.playClick(layer.sound, startAt, layer.automation);
-      if (layer.kind === 'fmTone') this.playFmTone(layer.sound, startAt, layer.automation);
-      playedLayerCount += 1;
-    }
-    return playedLayerCount;
+    const rendered = renderEffectLayers(
+      audioContext,
+      destination,
+      sound.layers,
+      audioContext.currentTime
+    );
+    this.renderedSources.push(...rendered.sources);
+    return sound.layers.filter((layer) => layer.enabled).length;
   }
 
   private startSustained(sound: SustainedSoundConfig): SustainedHandle | undefined {
@@ -1270,31 +1196,6 @@ class LabAudio {
     filter.connect(gain);
   }
 
-  private scheduleEnvelope(
-    parameter: AudioParam,
-    curve: AutomationPoint[] | undefined,
-    startAt: number,
-    durationMs: number,
-    volume: number,
-    attackSeconds: number,
-    releaseStartSeconds: number
-  ): void {
-    const endAt = startAt + durationMs / 1000;
-    parameter.setValueAtTime(0, startAt);
-    if (curve !== undefined && curve.length > 0) {
-      for (const point of curve) {
-        const time = startAt + Math.min(durationMs, Math.max(0, point.timeMs)) / 1000;
-        const value = Math.max(0, point.value * volume);
-        if (time === startAt) parameter.setValueAtTime(value, time);
-        else parameter.linearRampToValueAtTime(value, time);
-      }
-      return;
-    }
-    parameter.linearRampToValueAtTime(volume, startAt + attackSeconds);
-    parameter.setValueAtTime(volume, startAt + releaseStartSeconds);
-    parameter.linearRampToValueAtTime(0, endAt);
-  }
-
   private scheduleParameter(
     parameter: AudioParam,
     curve: AutomationPoint[] | undefined,
@@ -1321,16 +1222,6 @@ class LabAudio {
     }
   }
 
-  private trackOneShot(handle: OneShotHandle): void {
-    this.oneShotHandles.push(handle);
-    handle.source.addEventListener('ended', () => {
-      handle.gain.disconnect();
-      this.oneShotHandles = this.oneShotHandles.filter(
-        (activeHandle) => activeHandle !== handle
-      );
-    });
-  }
-
   private noise(audioContext: AudioContext): AudioBuffer {
     if (this.noiseBuffer !== undefined) return this.noiseBuffer;
 
@@ -1343,18 +1234,6 @@ class LabAudio {
     return this.noiseBuffer;
   }
 
-  private click(audioContext: AudioContext): AudioBuffer {
-    if (this.clickBuffer !== undefined) return this.clickBuffer;
-
-    const sampleCount = Math.max(1, Math.round(audioContext.sampleRate * 0.012));
-    this.clickBuffer = audioContext.createBuffer(1, sampleCount, audioContext.sampleRate);
-    const data = this.clickBuffer.getChannelData(0);
-    for (let index = 0; index < sampleCount; index += 1) {
-      const falloff = 1 - index / sampleCount;
-      data[index] = (Math.random() * 2 - 1) * falloff * falloff;
-    }
-    return this.clickBuffer;
-  }
 }
 
 const audio = new LabAudio();
@@ -1405,8 +1284,13 @@ if (
 
 masterVolume.value = `${GAME_AUDIO.masterVolume}`;
 
-const layerDurationMs = (layer: SoundLayerConfig): number =>
-  Math.max(0, layer.startMs ?? 0) + layer.sound.durationMs;
+const layerDurationMs = (layer: SoundLayerConfig): number => {
+  const duration =
+    layer.kind === 'impulseCluster'
+      ? Math.max(layer.sound.durationMs, layer.sound.spreadMs + layer.sound.decayMs)
+      : layer.sound.durationMs;
+  return Math.max(0, layer.startMs ?? 0) + duration;
+};
 
 const oneShotDurationMs = (sound: LayeredDefinition): number => {
   const durations = sound.draft.layers
@@ -1532,6 +1416,28 @@ const layerNumericValue = (
     return undefined;
   }
 
+  if (layer.kind === 'resonatorBank') {
+    if (key === 'attackMs') return layer.sound.attackMs;
+    if (key === 'durationMs') return layer.sound.durationMs;
+    if (key === 'filterFrequency') return layer.sound.filterFrequency;
+    if (key === 'releaseMs') return layer.sound.releaseMs;
+    if (key === 'volume') return layer.sound.volume;
+    return undefined;
+  }
+
+  if (layer.kind === 'impulseCluster') {
+    if (key === 'count') return layer.sound.count;
+    if (key === 'decayMs') return layer.sound.decayMs;
+    if (key === 'durationMs') return layer.sound.durationMs;
+    if (key === 'filterFrequency') return layer.sound.filterFrequency;
+    if (key === 'maxFrequency') return layer.sound.maxFrequency;
+    if (key === 'minFrequency') return layer.sound.minFrequency;
+    if (key === 'seed') return layer.sound.seed;
+    if (key === 'spreadMs') return layer.sound.spreadMs;
+    if (key === 'volume') return layer.sound.volume;
+    return undefined;
+  }
+
   if (key === 'attackMs') return layer.sound.attackMs;
   if (key === 'durationMs') return layer.sound.durationMs;
   if (key === 'filterFrequency') return layer.sound.filterFrequency;
@@ -1586,6 +1492,26 @@ const setLayerNumericValue = (
     if (key === 'durationMs') layer.sound.durationMs = value;
     if (key === 'filterFrequency') layer.sound.filterFrequency = value;
     if (key === 'releaseMs') layer.sound.releaseMs = value;
+    if (key === 'volume') layer.sound.volume = value;
+    return;
+  }
+  if (layer.kind === 'resonatorBank') {
+    if (key === 'attackMs') layer.sound.attackMs = value;
+    if (key === 'durationMs') layer.sound.durationMs = value;
+    if (key === 'filterFrequency') layer.sound.filterFrequency = value;
+    if (key === 'releaseMs') layer.sound.releaseMs = value;
+    if (key === 'volume') layer.sound.volume = value;
+    return;
+  }
+  if (layer.kind === 'impulseCluster') {
+    if (key === 'count') layer.sound.count = value;
+    if (key === 'decayMs') layer.sound.decayMs = value;
+    if (key === 'durationMs') layer.sound.durationMs = value;
+    if (key === 'filterFrequency') layer.sound.filterFrequency = value;
+    if (key === 'maxFrequency') layer.sound.maxFrequency = value;
+    if (key === 'minFrequency') layer.sound.minFrequency = value;
+    if (key === 'seed') layer.sound.seed = value;
+    if (key === 'spreadMs') layer.sound.spreadMs = value;
     if (key === 'volume') layer.sound.volume = value;
     return;
   }
@@ -1694,6 +1620,8 @@ const renderLayeredParameters = (sound: LayeredDefinition): void => {
     'noise',
     'click',
     'fmTone',
+    'resonatorBank',
+    'impulseCluster',
   ];
   for (const kind of layerKinds) {
     const button = document.createElement('button');
@@ -1747,6 +1675,8 @@ const layerKindLabel = (
   kind: SoundLayerConfig['kind'] | SustainedLayerConfig['kind']
 ): string => {
   if (kind === 'fmTone') return 'FM';
+  if (kind === 'resonatorBank') return 'Resonator Bank';
+  if (kind === 'impulseCluster') return 'Impulse Cluster';
   if (kind === 'fmSustained') return 'FM Sustained';
   if (kind === 'sustainedTone') return 'Tone';
   if (kind === 'sustainedNoise') return 'Noise';
@@ -1785,18 +1715,45 @@ const createDefaultLayer = (kind: SoundLayerConfig['kind']): SoundLayerConfig =>
       filterFrequency: 3_000,
     });
   }
-  return fmToneLayer(id, 'New FM tone', {
-    carrierType: 'sine',
-    modulatorType: 'sine',
-    frequencyStart: 640,
-    frequencyEnd: 1_180,
-    modulatorFrequency: 32,
-    modulationDepth: 80,
-    volume: 0.045,
-    durationMs: 150,
-    attackMs: 3,
-    releaseMs: 105,
-    filterFrequency: 3_200,
+  if (kind === 'fmTone') {
+    return fmToneLayer(id, 'New FM tone', {
+      carrierType: 'sine',
+      modulatorType: 'sine',
+      frequencyStart: 640,
+      frequencyEnd: 1_180,
+      modulatorFrequency: 32,
+      modulationDepth: 80,
+      volume: 0.045,
+      durationMs: 150,
+      attackMs: 3,
+      releaseMs: 105,
+      filterFrequency: 3_200,
+    });
+  }
+  if (kind === 'resonatorBank') {
+    return resonatorBankLayer(id, 'New resonator bank', {
+      attackMs: 1,
+      durationMs: 700,
+      filterFrequency: 8_000,
+      releaseMs: 650,
+      resonances: [
+        { decayMs: 620, frequency: 720, gain: 0.45 },
+        { decayMs: 500, frequency: 1_040, gain: 0.3 },
+        { decayMs: 390, frequency: 1_510, gain: 0.22 },
+      ],
+      volume: 0.1,
+    });
+  }
+  return impulseClusterLayer(id, 'New impulse cluster', {
+    count: 8,
+    decayMs: 70,
+    durationMs: 700,
+    filterFrequency: 9_000,
+    maxFrequency: 8_000,
+    minFrequency: 1_200,
+    seed: 10_019,
+    spreadMs: 420,
+    volume: 0.1,
   });
 };
 
@@ -1909,6 +1866,9 @@ const createLayerCard = (
       })
     );
   }
+  if (layer.kind === 'resonatorBank') {
+    fields.append(createResonanceEditor(layer));
+  }
   card.append(fields, createProcessorPlaceholder(layer));
   return card;
 };
@@ -1996,7 +1956,74 @@ const createSustainedLayerCard = (
 const layerFields = (layer: SoundLayerConfig): NumericField[] => {
   if (layer.kind === 'tone') return toneFields;
   if (layer.kind === 'fmTone') return fmToneFields;
+  if (layer.kind === 'resonatorBank') return resonatorBankFields;
+  if (layer.kind === 'impulseCluster') return impulseClusterFields;
   return noiseFields;
+};
+
+const createResonanceEditor = (layer: ResonatorBankLayerConfig): HTMLElement => {
+  const editor = document.createElement('section');
+  editor.className = 'resonance-editor';
+  const title = document.createElement('h4');
+  title.textContent = 'Resonances';
+  editor.append(title);
+
+  layer.sound.resonances.forEach((resonance, index) => {
+    const row = document.createElement('div');
+    row.className = 'resonance-row';
+    const label = document.createElement('strong');
+    label.textContent = `Resonance ${index + 1}`;
+    row.append(
+      label,
+      createNumericField(
+        { key: 'frequency', label: 'Frequency', minimum: 40, maximum: 18_000, step: 1 },
+        resonance.frequency,
+        (value) => {
+          resonance.frequency = value;
+        }
+      ),
+      createNumericField(
+        { key: 'gain', label: 'Gain', minimum: 0, maximum: 1, step: 0.01 },
+        resonance.gain,
+        (value) => {
+          resonance.gain = value;
+        }
+      ),
+      createNumericField(
+        { key: 'decayMs', label: 'Decay', minimum: 10, maximum: 4_000, step: 5 },
+        resonance.decayMs,
+        (value) => {
+          resonance.decayMs = value;
+        }
+      )
+    );
+    const remove = document.createElement('button');
+    remove.className = 'secondary-button';
+    remove.type = 'button';
+    remove.textContent = 'Remove resonance';
+    remove.addEventListener('click', () => {
+      layer.sound.resonances.splice(index, 1);
+      renderParameters();
+    });
+    row.append(remove);
+    editor.append(row);
+  });
+
+  const add = document.createElement('button');
+  add.className = 'secondary-button';
+  add.type = 'button';
+  add.textContent = 'Add resonance';
+  add.addEventListener('click', () => {
+    const previous = layer.sound.resonances[layer.sound.resonances.length - 1];
+    layer.sound.resonances.push({
+      decayMs: Math.max(80, (previous?.decayMs ?? 500) * 0.8),
+      frequency: Math.min(18_000, (previous?.frequency ?? 440) * 1.47),
+      gain: Math.max(0.05, (previous?.gain ?? 0.4) * 0.75),
+    });
+    renderParameters();
+  });
+  editor.append(add);
+  return editor;
 };
 
 const sustainedLayerFields = (layer: SustainedLayerConfig): NumericField[] => {

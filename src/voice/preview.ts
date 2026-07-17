@@ -1,14 +1,10 @@
 import type {
-  AutomationPoint,
-  LayerAutomationConfig,
-  SoundLayerConfig,
-} from '../config/audio';
-import type {
   BeatConfig,
   BeatVoice,
   MelodyConfig,
   ProceduralResult,
 } from './types';
+import { renderEffectLayers } from './effectRenderer';
 
 const midiToFrequency = (midi: number): number => 440 * 2 ** ((midi - 69) / 12);
 
@@ -29,7 +25,15 @@ export class ProceduralPreview {
 
     let durationMs: number;
     if (result.mode === 'effect') {
-      durationMs = this.playEffect(result.config.layers, startAt);
+      if (this.master === undefined) return;
+      const rendered = renderEffectLayers(
+        context,
+        this.master,
+        result.config.layers,
+        startAt
+      );
+      this.sources.push(...rendered.sources);
+      durationMs = rendered.durationMs;
     } else if (result.mode === 'beat') {
       durationMs = this.playBeat(result.config, startAt);
     } else {
@@ -78,188 +82,31 @@ export class ProceduralPreview {
     this.master = undefined;
   }
 
-  private playEffect(layers: SoundLayerConfig[], startAt: number): number {
-    let durationMs = 0;
-    for (const layer of layers) {
-      if (!layer.enabled) continue;
-      const layerOffsetMs = Math.max(0, layer.startMs ?? 0);
-      const layerStartAt = startAt + layerOffsetMs / 1000;
-      durationMs = Math.max(durationMs, layerOffsetMs + layer.sound.durationMs);
-      if (layer.kind === 'tone') {
-        const oscillator = this.context().createOscillator();
-        oscillator.type = layer.sound.type;
-        this.scheduleParameter(
-          oscillator.frequency,
-          layer.automation?.frequency,
-          layerStartAt,
-          layer.sound.durationMs,
-          layer.sound.frequencyStart,
-          layer.sound.frequencyEnd
-        );
-        this.connectEnvelope(
-          oscillator,
-          layer.sound.volume,
-          layer.sound.attackMs,
-          layer.sound.releaseMs,
-          layer.sound.durationMs,
-          layer.sound.filterFrequency,
-          layerStartAt,
-          layer.automation
-        );
-      } else if (layer.kind === 'fmTone') {
-        const context = this.context();
-        const carrier = context.createOscillator();
-        const modulator = context.createOscillator();
-        const modulationGain = context.createGain();
-        carrier.type = layer.sound.carrierType;
-        modulator.type = layer.sound.modulatorType;
-        this.scheduleParameter(
-          carrier.frequency,
-          layer.automation?.frequency,
-          layerStartAt,
-          layer.sound.durationMs,
-          layer.sound.frequencyStart,
-          layer.sound.frequencyEnd
-        );
-        modulator.frequency.value = layer.sound.modulatorFrequency;
-        modulationGain.gain.value = layer.sound.modulationDepth;
-        modulator.connect(modulationGain);
-        modulationGain.connect(carrier.frequency);
-        this.connectEnvelope(
-          carrier,
-          layer.sound.volume,
-          layer.sound.attackMs,
-          layer.sound.releaseMs,
-          layer.sound.durationMs,
-          layer.sound.filterFrequency,
-          layerStartAt,
-          layer.automation
-        );
-        modulator.start(layerStartAt);
-        modulator.stop(layerStartAt + layer.sound.durationMs / 1000 + 0.04);
-        this.sources.push(modulator);
-      } else {
-        const source = this.context().createBufferSource();
-        source.buffer = this.noiseBuffer(layer.sound.durationMs, layer.kind === 'click');
-        this.connectEnvelope(
-          source,
-          layer.sound.volume,
-          layer.sound.attackMs,
-          layer.sound.releaseMs,
-          layer.sound.durationMs,
-          layer.sound.filterFrequency,
-          layerStartAt,
-          layer.automation,
-          layer.kind === 'click' ? 'highpass' : 'lowpass'
-        );
-      }
-    }
-    return Math.max(120, durationMs);
-  }
-
-  private connectEnvelope(
-    source: AudioScheduledSourceNode,
-    volume: number,
-    attackMs: number,
-    releaseMs: number,
-    durationMs: number,
-    filterFrequency: number | undefined,
-    startAt: number,
-    automation: LayerAutomationConfig | undefined,
-    filterType: BiquadFilterType = 'lowpass'
-  ): void {
-    const context = this.context();
-    const gain = context.createGain();
-    const filter = context.createBiquadFilter();
-    const duration = durationMs / 1000;
-    const attackEnd = startAt + Math.min(duration, attackMs / 1000);
-    const releaseStart = startAt + Math.max(attackMs / 1000, duration - releaseMs / 1000);
-    if (automation?.gain !== undefined && automation.gain.length > 0) {
-      gain.gain.setValueAtTime(0, startAt);
-      for (const point of automation.gain) {
-        const pointTime = startAt + Math.min(duration, Math.max(0, point.timeMs / 1000));
-        gain.gain.linearRampToValueAtTime(Math.max(0, point.value * volume), pointTime);
-      }
-    } else {
-      gain.gain.setValueAtTime(0, startAt);
-      gain.gain.linearRampToValueAtTime(volume, attackEnd);
-      gain.gain.setValueAtTime(volume, releaseStart);
-      gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-    }
-    filter.type = filterType;
-    this.scheduleParameter(
-      filter.frequency,
-      automation?.filterFrequency,
-      startAt,
-      durationMs,
-      filterFrequency ?? 12_000,
-      filterFrequency ?? 12_000
-    );
-    source.connect(filter);
-    filter.connect(gain);
-    if (this.master !== undefined) gain.connect(this.master);
-    source.start(startAt);
-    source.stop(startAt + duration + 0.04);
-    this.sources.push(source);
-  }
-
-  private scheduleParameter(
-    parameter: AudioParam,
-    curve: AutomationPoint[] | undefined,
-    startAt: number,
-    durationMs: number,
-    startValue: number,
-    endValue: number
-  ): void {
-    if (curve === undefined || curve.length === 0) {
-      parameter.setValueAtTime(Math.max(0.0001, startValue), startAt);
-      parameter.linearRampToValueAtTime(
-        Math.max(0.0001, endValue),
-        startAt + durationMs / 1000
-      );
-      return;
-    }
-    parameter.setValueAtTime(Math.max(0.0001, startValue), startAt);
-    for (const point of curve) {
-      const time = startAt + Math.min(durationMs, Math.max(0, point.timeMs)) / 1000;
-      if (time === startAt) {
-        parameter.setValueAtTime(Math.max(0.0001, point.value), time);
-      } else {
-        parameter.linearRampToValueAtTime(Math.max(0.0001, point.value), time);
-      }
-    }
-  }
-
   private playBeat(config: BeatConfig, startAt: number): number {
-    const stepMs = 60_000 / config.bpm / config.stepsPerBeat;
     if (this.master !== undefined) this.master.gain.value = config.masterVolume;
     for (const lane of config.lanes) {
-      lane.steps.forEach((velocity, step) => {
-        if (velocity <= 0) return;
-        this.playBeatVoice(lane.voice, startAt + (step * stepMs) / 1000, velocity);
-      });
+      for (const hit of lane.hits) {
+        this.playBeatVoice(lane.voice, startAt + hit.startMs / 1000, hit.velocity);
+      }
     }
-    return config.stepCount * stepMs;
+    return config.durationMs;
   }
 
   private playBeatVoice(voice: BeatVoice, startAt: number, velocity: number): void {
     const context = this.context();
     const duration = voice.decayMs / 1000;
-    if (voice.kind === 'kick') {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(Math.max(90, voice.frequency * 2.6), startAt);
-      oscillator.frequency.exponentialRampToValueAtTime(Math.max(38, voice.frequency), startAt + duration);
-      gain.gain.setValueAtTime(voice.volume * velocity, startAt);
-      gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-      oscillator.connect(gain);
-      if (this.master !== undefined) gain.connect(this.master);
-      oscillator.start(startAt);
-      oscillator.stop(startAt + duration + 0.03);
-      this.sources.push(oscillator);
-    }
-    if (voice.kind !== 'kick' || voice.noiseAmount > 0.15) {
+    const oscillator = context.createOscillator();
+    const toneGain = context.createGain();
+    oscillator.type = voice.kind === 'kick' ? 'sine' : 'triangle';
+    oscillator.frequency.value = voice.frequency;
+    toneGain.gain.setValueAtTime(voice.volume * velocity, startAt);
+    toneGain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+    oscillator.connect(toneGain);
+    if (this.master !== undefined) toneGain.connect(this.master);
+    oscillator.start(startAt);
+    oscillator.stop(startAt + duration + 0.03);
+    this.sources.push(oscillator);
+    if (voice.noiseAmount > 0.08) {
       const source = context.createBufferSource();
       const filter = context.createBiquadFilter();
       const gain = context.createGain();

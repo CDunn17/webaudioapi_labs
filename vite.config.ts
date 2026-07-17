@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite';
+import packageConfig from './package.json';
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(packageConfig.version),
+  },
   build: {
     rollupOptions: {
       input: {

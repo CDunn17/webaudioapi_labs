@@ -276,6 +276,55 @@ export const detectOnsets = (frames: FrameFeatures[], minimumGapMs: number): num
   return onsets;
 };
 
+// Use spectral/energy attacks to find quiet hits, then snap each attack to its
+// nearby amplitude crest. This is deliberately more permissive than effect onset
+// detection; the beat generator only needs event timing and relative timbre.
+export const detectBeatPeaks = (frames: FrameFeatures[], minimumGapMs: number): number[] => {
+  if (frames.length < 3) return [];
+  const levels = smoothValues(frames.map((frame) => frame.rms), 1);
+  const maximum = Math.max(0, ...levels);
+  const floor = median(levels);
+  const threshold = Math.max(0.006, floor * 1.25, maximum * 0.07);
+  const candidates: Array<{ level: number; timeMs: number }> = [];
+
+  const attacks = detectOnsets(frames, Math.max(55, minimumGapMs * 0.7));
+  for (const attack of attacks) {
+    const region = frames
+      .map((frame, index) => ({ index, timeMs: frame.timeMs }))
+      .filter(({ timeMs }) => timeMs >= attack - 25 && timeMs <= attack + 75);
+    const crestIndex = region.reduce(
+      (best, item) => (levels[item.index] ?? 0) > (levels[best] ?? 0) ? item.index : best,
+      region[0]?.index ?? 0
+    );
+    const level = levels[crestIndex] ?? 0;
+    if (level >= threshold) {
+      candidates.push({ level, timeMs: frames[crestIndex]?.timeMs ?? attack });
+    }
+  }
+
+  // A strongly separated amplitude crest can be missed when its spectrum is
+  // similar to the preceding hit, so include those crests as a second signal.
+  for (let index = 1; index < levels.length - 1; index += 1) {
+    const level = levels[index] ?? 0;
+    const valley = Math.min(...levels.slice(Math.max(0, index - 3), index));
+    if (level >= threshold && level > (levels[index - 1] ?? 0) && level >= (levels[index + 1] ?? 0) && level > valley * 1.12) {
+      candidates.push({ level, timeMs: frames[index]?.timeMs ?? 0 });
+    }
+  }
+
+  candidates.sort((first, second) => first.timeMs - second.timeMs);
+  const peaks: typeof candidates = [];
+  for (const candidate of candidates) {
+    const previous = peaks[peaks.length - 1];
+    if (previous === undefined || candidate.timeMs - previous.timeMs >= minimumGapMs) {
+      peaks.push(candidate);
+    } else if (candidate.level > previous.level) {
+      peaks[peaks.length - 1] = candidate;
+    }
+  }
+  return peaks.map((peak) => peak.timeMs);
+};
+
 const autocorrelationPitch = (
   frame: Float32Array,
   sampleRate: number

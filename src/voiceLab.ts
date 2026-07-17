@@ -1,9 +1,12 @@
 import { analysisAdapter, analysisEngineLabel } from './voice/analyzers';
 import { frameRms } from './voice/dsp';
+import { fitEffectConfig } from './voice/fit';
 import { generateResult } from './voice/generators';
 import { ProceduralPreview } from './voice/preview';
 import type {
   AnalysisEngineId,
+  BeatConfig,
+  BeatLane,
   CreationMode,
   ProceduralResult,
 } from './voice/types';
@@ -33,6 +36,7 @@ const MODE_DETAILS: Record<CreationMode, ModeDetails> = {
 };
 
 const modeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-mode]'));
+const appVersion = document.getElementById('app-version');
 const recordButton = document.getElementById('record-button');
 const stopButton = document.getElementById('stop-button');
 const clearButton = document.getElementById('clear-button');
@@ -52,8 +56,14 @@ const resultsSummary = document.getElementById('results-summary');
 const voiceResults = document.getElementById('voice-results');
 const webAudioCheckbox = document.getElementById('engine-web-audio');
 const meydaCheckbox = document.getElementById('engine-meyda');
+const filterStartInput = document.getElementById('filter-start');
+const filterEndInput = document.getElementById('filter-end');
+const filterMinLevelInput = document.getElementById('filter-min-level');
+const filterMaxLevelInput = document.getElementById('filter-max-level');
+const resetFiltersButton = document.getElementById('reset-filters');
 
 if (
+  appVersion === null ||
   !(recordButton instanceof HTMLButtonElement) ||
   !(stopButton instanceof HTMLButtonElement) ||
   !(clearButton instanceof HTMLButtonElement) ||
@@ -72,10 +82,17 @@ if (
   resultsSummary === null ||
   voiceResults === null ||
   !(webAudioCheckbox instanceof HTMLInputElement) ||
-  !(meydaCheckbox instanceof HTMLInputElement)
+  !(meydaCheckbox instanceof HTMLInputElement) ||
+  !(filterStartInput instanceof HTMLInputElement) ||
+  !(filterEndInput instanceof HTMLInputElement) ||
+  !(filterMinLevelInput instanceof HTMLInputElement) ||
+  !(filterMaxLevelInput instanceof HTMLInputElement) ||
+  !(resetFiltersButton instanceof HTMLButtonElement)
 ) {
   throw new Error('Voice Lab markup is missing required elements.');
 }
+
+appVersion.textContent = `v${__APP_VERSION__}`;
 
 let selectedMode: CreationMode = 'effect';
 let decodedRecording: AudioBuffer | undefined;
@@ -92,6 +109,64 @@ let captureStartedAt = 0;
 let generatedResults: ProceduralResult[] = [];
 let activePreviewEngine: AnalysisEngineId | undefined;
 const preview = new ProceduralPreview();
+
+const resetAnalysisFilters = (): void => {
+  const duration = decodedRecording?.duration ?? 0;
+  filterStartInput.value = '0';
+  filterStartInput.max = duration.toFixed(2);
+  filterEndInput.value = duration.toFixed(2);
+  filterEndInput.max = duration.toFixed(2);
+  filterMinLevelInput.value = '0';
+  filterMaxLevelInput.value = '100';
+};
+
+const filteredRecording = (source: AudioBuffer): AudioBuffer => {
+  const clampedNumber = (input: HTMLInputElement, fallback: number): number => {
+    const value = Number(input.value);
+    return Number.isFinite(value) ? value : fallback;
+  };
+  const sampleDuration = 1 / source.sampleRate;
+  const startSeconds = Math.max(0, Math.min(source.duration - sampleDuration, clampedNumber(filterStartInput, 0)));
+  const endSeconds = Math.max(startSeconds + 1 / source.sampleRate, Math.min(
+    source.duration,
+    clampedNumber(filterEndInput, source.duration)
+  ));
+  const minimumLevel = Math.max(0, Math.min(1, clampedNumber(filterMinLevelInput, 0) / 100));
+  const maximumLevel = Math.max(minimumLevel, Math.min(1, clampedNumber(filterMaxLevelInput, 100) / 100));
+  const startSample = Math.floor(startSeconds * source.sampleRate);
+  const endSample = Math.max(startSample + 1, Math.ceil(endSeconds * source.sampleRate));
+  const length = endSample - startSample;
+  const output = new AudioBuffer({
+    length,
+    numberOfChannels: source.numberOfChannels,
+    sampleRate: source.sampleRate,
+  });
+  let peak = 0;
+  for (let channel = 0; channel < source.numberOfChannels; channel += 1) {
+    const input = source.getChannelData(channel);
+    for (let index = startSample; index < endSample; index += 1) {
+      peak = Math.max(peak, Math.abs(input[index] ?? 0));
+    }
+  }
+  const envelopeCoefficient = Math.exp(-1 / (source.sampleRate * 0.012));
+  const gainCoefficient = Math.exp(-1 / (source.sampleRate * 0.003));
+  let envelope = 0;
+  let gain = 0;
+  for (let index = 0; index < length; index += 1) {
+    let magnitude = 0;
+    for (let channel = 0; channel < source.numberOfChannels; channel += 1) {
+      magnitude = Math.max(magnitude, Math.abs(source.getChannelData(channel)[startSample + index] ?? 0));
+    }
+    envelope = Math.max(magnitude, envelope * envelopeCoefficient);
+    const normalizedLevel = peak > 0 ? envelope / peak : 0;
+    const targetGain = normalizedLevel >= minimumLevel && normalizedLevel <= maximumLevel ? 1 : 0;
+    gain = targetGain + (gain - targetGain) * gainCoefficient;
+    for (let channel = 0; channel < source.numberOfChannels; channel += 1) {
+      output.getChannelData(channel)[index] = (source.getChannelData(channel)[startSample + index] ?? 0) * gain;
+    }
+  }
+  return output;
+};
 
 const setCaptureStatus = (value: string): void => {
   captureStatus.textContent = value;
@@ -170,6 +245,209 @@ const renderBeatLanes = (result: Extract<ProceduralResult, { mode: 'beat' }>): H
   return lanes;
 };
 
+const rebuildBeatGroups = (config: BeatConfig): void => {
+  const stepMs = 60_000 / config.bpm / config.stepsPerBeat;
+  const groups = new Map<string, BeatLane>();
+  for (const lane of config.lanes) {
+    for (const hit of lane.hits) {
+      const label = hit.label.trim() || 'Unlabeled';
+      hit.label = label;
+      let group = groups.get(label.toLocaleLowerCase());
+      if (group === undefined) {
+        group = {
+          hits: [],
+          label,
+          steps: Array.from({ length: config.stepCount }, () => 0),
+          voice: { ...lane.voice },
+        };
+        groups.set(label.toLocaleLowerCase(), group);
+      }
+      group.hits.push(hit);
+      const step = Math.round(hit.startMs / stepMs) % config.stepCount;
+      group.steps[step] = Math.max(group.steps[step] ?? 0, hit.velocity);
+    }
+  }
+  config.lanes = [...groups.values()].map((lane) => ({
+    ...lane,
+    hits: lane.hits.sort((first, second) => first.startMs - second.startMs),
+  }));
+};
+
+const numberEditor = (
+  value: number,
+  minimum: number,
+  maximum: number,
+  step: number,
+  onChange: (value: number) => void
+): HTMLInputElement => {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = `${minimum}`;
+  input.max = `${maximum}`;
+  input.step = `${step}`;
+  input.value = `${value}`;
+  input.addEventListener('change', () => {
+    const parsed = Number(input.value);
+    if (Number.isFinite(parsed)) onChange(Math.max(minimum, Math.min(maximum, parsed)));
+  });
+  return input;
+};
+
+const renderBeatEditor = (
+  result: Extract<ProceduralResult, { mode: 'beat' }>
+): HTMLElement => {
+  const editor = document.createElement('section');
+  editor.className = 'beat-event-editor';
+  const heading = document.createElement('div');
+  heading.className = 'beat-editor-heading';
+  const headingText = document.createElement('div');
+  const title = document.createElement('strong');
+  const guidance = document.createElement('p');
+  title.textContent = 'Review events and suggested sounds';
+  guidance.textContent = 'Events with the same label use exactly the same digital sound.';
+  headingText.append(title, guidance);
+  const reanalyze = document.createElement('button');
+  reanalyze.className = 'secondary-button';
+  reanalyze.type = 'button';
+  reanalyze.textContent = 'Re-analyze recording';
+  reanalyze.addEventListener('click', () => void generateConfigs());
+  const headingActions = document.createElement('div');
+  headingActions.className = 'transport-row';
+  const addEvent = document.createElement('button');
+  addEvent.className = 'secondary-button';
+  addEvent.type = 'button';
+  addEvent.textContent = 'Add event';
+  addEvent.addEventListener('click', () => {
+    const lane = result.config.lanes[0];
+    if (lane === undefined) return;
+    lane.hits.push({
+      label: lane.label,
+      startMs: Math.max(0, result.config.durationMs - 260),
+      velocity: 0.7,
+    });
+    rebuildBeatGroups(result.config);
+    renderResults();
+  });
+  headingActions.append(addEvent, reanalyze);
+  heading.append(headingText, headingActions);
+  editor.append(heading);
+
+  const timing = document.createElement('div');
+  timing.className = 'beat-timing-editor';
+  const subdivisionLabel = document.createElement('label');
+  subdivisionLabel.textContent = 'Grid divisions per beat';
+  const subdivision = document.createElement('select');
+  for (const value of [1, 2, 4, 8]) {
+    const option = document.createElement('option');
+    option.value = `${value}`;
+    option.textContent = `${value}`;
+    option.selected = value === result.config.stepsPerBeat;
+    subdivision.append(option);
+  }
+  subdivisionLabel.append(subdivision);
+  const strengthLabel = document.createElement('label');
+  strengthLabel.textContent = 'Timing correction (%)';
+  const strength = numberEditor(50, 0, 100, 5, () => undefined);
+  strengthLabel.append(strength);
+  const applyTiming = document.createElement('button');
+  applyTiming.className = 'secondary-button';
+  applyTiming.type = 'button';
+  applyTiming.textContent = 'Apply timing';
+  applyTiming.addEventListener('click', () => {
+    const divisions = Number(subdivision.value);
+    const correction = Number(strength.value) / 100;
+    const gridMs = 60_000 / result.config.bpm / divisions;
+    result.config.stepsPerBeat = divisions;
+    for (const lane of result.config.lanes) {
+      for (const hit of lane.hits) {
+        const target = Math.round(hit.startMs / gridMs) * gridMs;
+        hit.startMs += (target - hit.startMs) * correction;
+      }
+    }
+    rebuildBeatGroups(result.config);
+    renderResults();
+  });
+  timing.append(subdivisionLabel, strengthLabel, applyTiming);
+  editor.append(timing);
+
+  const sounds = document.createElement('div');
+  sounds.className = 'suggested-sounds';
+  for (const lane of result.config.lanes) {
+    const sound = document.createElement('div');
+    sound.className = 'suggested-sound';
+    const soundTitle = document.createElement('strong');
+    soundTitle.textContent = `${lane.label} suggestion`;
+    const fields = document.createElement('div');
+    fields.className = 'beat-editor-fields';
+    const addField = (label: string, input: HTMLInputElement): void => {
+      const wrapper = document.createElement('label');
+      wrapper.append(label, input);
+      fields.append(wrapper);
+    };
+    addField('Tone (Hz)', numberEditor(lane.voice.frequency, 40, 2_000, 1, (value) => {
+      lane.voice.frequency = value;
+      renderResults();
+    }));
+    addField('Decay (ms)', numberEditor(lane.voice.decayMs, 20, 500, 5, (value) => {
+      lane.voice.decayMs = value;
+      renderResults();
+    }));
+    addField('Volume', numberEditor(lane.voice.volume, 0.01, 1, 0.01, (value) => {
+      lane.voice.volume = value;
+      renderResults();
+    }));
+    sound.append(soundTitle, fields);
+    sounds.append(sound);
+  }
+  editor.append(sounds);
+
+  const events = document.createElement('div');
+  events.className = 'beat-events';
+  const orderedEvents = result.config.lanes.flatMap((lane) =>
+    lane.hits.map((hit) => ({ hit, lane }))
+  ).sort((first, second) => first.hit.startMs - second.hit.startMs);
+  orderedEvents.forEach(({ hit, lane }, index) => {
+    const row = document.createElement('div');
+    row.className = 'beat-event-row';
+    const eventNumber = document.createElement('strong');
+    eventNumber.textContent = `${index + 1}`;
+    const label = document.createElement('input');
+    label.value = hit.label;
+    label.setAttribute('aria-label', `Event ${index + 1} sound label`);
+    label.addEventListener('change', () => {
+      hit.label = label.value;
+      rebuildBeatGroups(result.config);
+      renderResults();
+    });
+    const time = numberEditor(hit.startMs, 0, result.config.durationMs, 1, (value) => {
+      hit.startMs = value;
+      rebuildBeatGroups(result.config);
+      renderResults();
+    });
+    time.setAttribute('aria-label', `Event ${index + 1} time in milliseconds`);
+    const velocity = numberEditor(hit.velocity, 0.05, 1, 0.05, (value) => {
+      hit.velocity = value;
+      rebuildBeatGroups(result.config);
+      renderResults();
+    });
+    velocity.setAttribute('aria-label', `Event ${index + 1} velocity`);
+    const remove = document.createElement('button');
+    remove.className = 'secondary-button';
+    remove.type = 'button';
+    remove.textContent = 'Remove';
+    remove.disabled = orderedEvents.length <= 1;
+    remove.addEventListener('click', () => {
+      lane.hits = lane.hits.filter((candidate) => candidate !== hit);
+      rebuildBeatGroups(result.config);
+      renderResults();
+    });
+    row.append(eventNumber, label, time, velocity, remove);
+    events.append(row);
+  });
+  editor.append(events);
+  return editor;
+};
+
 const updatePreviewButtons = (): void => {
   document.querySelectorAll<HTMLButtonElement>('[data-preview-engine]').forEach((button) => {
     button.textContent = button.dataset.previewEngine === activePreviewEngine ? 'Stop preview' : 'Preview config';
@@ -206,6 +484,9 @@ const renderResults = (): void => {
       addMetric(metrics, 'Active duration', `${(result.features.durationMs / 1000).toFixed(2)}s`);
       addMetric(metrics, 'Brightness', `${Math.round(result.features.centroidHz)} Hz`);
       addMetric(metrics, 'Onsets', `${result.features.onsetTimesMs.length}`);
+      if (result.fit !== undefined) {
+        addMetric(metrics, 'Render fit', `${Math.round(result.fit.improvement * 100)}% closer`);
+      }
     } else if (result.mode === 'beat') {
       addMetric(metrics, 'Tempo', `${result.config.bpm} BPM`);
       addMetric(metrics, 'Lanes', `${result.config.lanes.length}`);
@@ -213,7 +494,7 @@ const renderResults = (): void => {
       addMetric(
         metrics,
         'Hits',
-        `${result.config.lanes.reduce((total, lane) => total + lane.steps.filter((step) => step > 0).length, 0)}`
+        `${result.config.lanes.reduce((total, lane) => total + lane.hits.length, 0)}`
       );
     } else {
       addMetric(metrics, 'Notes', `${result.config.notes.length}`);
@@ -266,7 +547,7 @@ const renderResults = (): void => {
     config.className = 'config-preview';
     config.textContent = formatConfig(result);
     card.append(header, metrics);
-    if (result.mode === 'beat') card.append(renderBeatLanes(result));
+    if (result.mode === 'beat') card.append(renderBeatLanes(result), renderBeatEditor(result));
     card.append(actions, config);
     voiceResults.append(card);
   }
@@ -307,6 +588,7 @@ const decodeRecording = async (blob: Blob, sourceLabel: string): Promise<void> =
   const context = new AudioContext();
   try {
     decodedRecording = await context.decodeAudioData(await blob.arrayBuffer());
+    resetAnalysisFilters();
     captureTime.textContent = `${decodedRecording.duration.toFixed(1)}s`;
     analyzeButton.disabled = false;
     setCaptureStatus('Ready');
@@ -408,14 +690,41 @@ const generateConfigs = async (): Promise<void> => {
   resultsSummary.textContent = 'Extracting features and fitting procedural parameters…';
   emptyResults('Analyzing the recording…');
   captureMessage.value = '';
+  const analysisRecording = filteredRecording(decodedRecording);
 
   for (const engine of engines) {
     const adapter = analysisAdapter(engine);
     if (adapter === undefined) continue;
     try {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-      const features = await adapter.analyze(decodedRecording, selectedMode);
-      generatedResults.push(generateResult(selectedMode, features));
+      const features = await adapter.analyze(analysisRecording, selectedMode);
+      const result = generateResult(selectedMode, features);
+      if (result.mode === 'effect') {
+        try {
+          setResultStatus('Fitting');
+          const fitted = await fitEffectConfig(
+            result.config,
+            features,
+            adapter,
+            (completed, total) => {
+              resultsSummary.textContent = `${adapter.label}: fitting procedural render ${completed}/${total}…`;
+            }
+          );
+          const improvement = fitted.initialLoss > 0
+            ? Math.max(0, 1 - fitted.finalLoss / fitted.initialLoss)
+            : 0;
+          result.config = fitted.config;
+          result.fit = {
+            candidateCount: fitted.candidateCount,
+            finalLoss: fitted.finalLoss,
+            improvement,
+          };
+          result.summary += ` Render fitting evaluated ${fitted.candidateCount} candidates.`;
+        } catch {
+          captureMessage.value = `${adapter.label} generated a config, but offline fitting was unavailable.`;
+        }
+      }
+      generatedResults.push(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown analysis error';
       captureMessage.value = `${adapter.label} could not analyze this recording: ${message}`;
@@ -438,6 +747,7 @@ const clearRecording = (): void => {
   preview.stop();
   activePreviewEngine = undefined;
   decodedRecording = undefined;
+  resetAnalysisFilters();
   generatedResults = [];
   if (recordingUrl !== undefined) URL.revokeObjectURL(recordingUrl);
   recordingUrl = undefined;
@@ -490,6 +800,22 @@ recordingPlayback.addEventListener('play', () => {
   activePreviewEngine = undefined;
   updatePreviewButtons();
 });
+resetFiltersButton.addEventListener('click', () => {
+  resetAnalysisFilters();
+  captureMessage.value = decodedRecording === undefined
+    ? ''
+    : 'Analysis filter reset. Generate configs to apply it.';
+});
+for (const input of [filterStartInput, filterEndInput, filterMinLevelInput, filterMaxLevelInput]) {
+  input.addEventListener('change', () => {
+    generatedResults = [];
+    preview.stop();
+    activePreviewEngine = undefined;
+    renderResults();
+    setResultStatus('Filter changed');
+    captureMessage.value = 'Generate configs to apply the analysis filter.';
+  });
+}
 window.addEventListener('pagehide', () => {
   cleanCaptureResources();
   preview.close();

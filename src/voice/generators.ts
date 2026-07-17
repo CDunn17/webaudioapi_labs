@@ -1,8 +1,10 @@
 import type {
   AutomationPoint,
   FmToneLayerConfig,
+  ImpulseClusterLayerConfig,
   LayeredSoundConfig,
   NoiseLayerConfig,
+  ResonatorBankLayerConfig,
   SoundLayerConfig,
   ToneLayerConfig,
 } from '../config/audio';
@@ -17,11 +19,6 @@ import type {
   MelodyNote,
   ProceduralResult,
 } from './types';
-
-// TODO(voice-lab): Add resonator-bank and stochastic impulse-cluster primitives
-// for glass, metal, debris, and other inharmonic effect families.
-// TODO(voice-lab): Render candidate configs with OfflineAudioContext and refine
-// parameters by comparing their feature curves with the source recording.
 
 const rounded = (value: number, minimum: number, maximum: number): number =>
   Math.round(clamp(value, minimum, maximum));
@@ -215,6 +212,62 @@ const effectConfig = (features: AudioFeatures): LayeredSoundConfig => {
       },
     });
   });
+
+  const crestFactor = features.peak / Math.max(0.01, features.rms);
+  const isImpactLike = crestFactor > 3.2 || onsets.length > 1;
+  if (isImpactLike && features.flatness < 0.72) {
+    const baseFrequency = clamp(features.centroidHz * 0.32, 180, 2_200);
+    const ratios = [1, 1.37, 1.91, 2.63, 3.44, 4.17];
+    const resonanceDuration = rounded(durationMs * 0.72, 140, 1_800);
+    const resonatorLayer: ResonatorBankLayerConfig = {
+      enabled: true,
+      id: `${engineId}-resonator-bank`,
+      kind: 'resonatorBank',
+      name: 'Inharmonic resonances',
+      processors: [],
+      startMs: rounded(onsets[0] ?? 0, 0, durationMs),
+      sound: {
+        attackMs: 1,
+        durationMs: resonanceDuration,
+        filterFrequency: rounded(features.rolloffHz, 1_200, 14_000),
+        releaseMs: resonanceDuration,
+        resonances: ratios.map((ratio, index) => ({
+          decayMs: rounded(
+            resonanceDuration * (0.92 - index * 0.09) * (0.7 + features.flatness * 0.3),
+            80,
+            resonanceDuration
+          ),
+          frequency: rounded(baseFrequency * ratio, 90, 12_000),
+          gain: clamp(0.52 / (1 + index * 0.38), 0.08, 0.52),
+        })),
+        volume: clamp(volume * 0.42, 0.035, 0.14),
+      },
+    };
+    layers.push(resonatorLayer);
+  }
+
+  if (isImpactLike && (features.flatness > 0.14 || onsets.length > 2)) {
+    const impulseLayer: ImpulseClusterLayerConfig = {
+      enabled: true,
+      id: `${engineId}-impulse-cluster`,
+      kind: 'impulseCluster',
+      name: 'Scattered fragments',
+      processors: [],
+      startMs: rounded(onsets[0] ?? 0, 0, durationMs),
+      sound: {
+        count: rounded(4 + onsets.length * 1.4 + features.flatness * 8, 4, 20),
+        decayMs: rounded(28 + features.flatness * 105, 24, 150),
+        durationMs: rounded(durationMs * 0.72, 120, 2_000),
+        filterFrequency: rounded(features.rolloffHz, 1_800, 16_000),
+        maxFrequency: rounded(Math.max(2_400, features.rolloffHz), 2_400, 16_000),
+        minFrequency: rounded(Math.max(350, features.centroidHz * 0.42), 300, 5_000),
+        seed: features.engine === 'meyda' ? 20_031 : 10_019,
+        spreadMs: rounded(durationMs * (0.32 + features.flatness * 0.38), 90, 1_500),
+        volume: clamp(volume * 0.5, 0.04, 0.17),
+      },
+    };
+    layers.push(impulseLayer);
+  }
   return { layers };
 };
 
@@ -222,6 +275,32 @@ const nearestFrame = (features: AudioFeatures, timeMs: number): FrameFeatures =>
   features.frames.reduce((best, frame) =>
     Math.abs(frame.timeMs - timeMs) < Math.abs(best.timeMs - timeMs) ? frame : best
   );
+
+const peakRegionFrame = (features: AudioFeatures, timeMs: number): FrameFeatures => {
+  const region = features.frames.filter(
+    (frame) => frame.timeMs >= timeMs - 20 && frame.timeMs <= timeMs + 90
+  );
+  if (region.length === 0) return nearestFrame(features, timeMs);
+  const weights = region.map((frame) => Math.max(0.001, frame.rms));
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const weighted = (select: (frame: FrameFeatures) => number): number =>
+    region.reduce(
+      (sum, frame, index) => sum + select(frame) * (weights[index] ?? 0),
+      0
+    ) / totalWeight;
+  const mfccLength = Math.max(0, ...region.map((frame) => frame.mfcc.length));
+  return {
+    centroidHz: weighted((frame) => frame.centroidHz),
+    flatness: weighted((frame) => frame.flatness),
+    mfcc: Array.from({ length: mfccLength }, (_, index) =>
+      weighted((frame) => frame.mfcc[index] ?? 0)
+    ),
+    rms: Math.max(...region.map((frame) => frame.rms)),
+    rolloffHz: weighted((frame) => frame.rolloffHz),
+    timeMs,
+    zcr: weighted((frame) => frame.zcr),
+  };
+};
 
 const frameVector = (frame: FrameFeatures): number[] => {
   const base = [
@@ -296,7 +375,7 @@ const estimateBpm = (onsets: number[]): number => {
 
 const beatConfig = (features: AudioFeatures): BeatConfig => {
   const onsets = features.onsetTimesMs.length > 0 ? features.onsetTimesMs : [0];
-  const eventFrames = onsets.map((time) => nearestFrame(features, time));
+  const eventFrames = onsets.map((time) => peakRegionFrame(features, time));
   const clusterCount = eventFrames.length < 3 ? 1 : eventFrames.length < 7 ? 2 : 3;
   const assignments = clusterFrames(eventFrames, clusterCount);
   const bpm = estimateBpm(onsets);
@@ -344,20 +423,35 @@ const beatConfig = (features: AudioFeatures): BeatConfig => {
       const step = Math.round((onset - origin) / stepMs) % stepCount;
       steps[step] = Math.max(steps[step] ?? 0, clamp((eventFrames[eventIndex]?.rms ?? 0.1) * 5, 0.35, 1));
     });
+    const hits = cluster.memberIndexes.map((eventIndex) => ({
+      label: kind === 'kick' ? 'Sound A' : kind === 'snare' ? 'Sound B' : 'Sound C',
+      startMs: rounded((onsets[eventIndex] ?? origin) - origin, 0, features.durationMs),
+      velocity: clamp((eventFrames[eventIndex]?.rms ?? 0.1) * 5, 0.35, 1),
+    }));
+    const relativeFrequencies =
+      ordered.length === 1 ? [220] : ordered.length === 2 ? [110, 440] : [90, 260, 760];
     return {
-      label: kind === 'kick' ? 'Low hit' : kind === 'snare' ? 'Mid hit' : 'Bright hit',
+      hits,
+      label: hits[0]?.label ?? 'Sound A',
       steps,
       voice: {
-        decayMs: rounded(kind === 'kick' ? 150 : kind === 'snare' ? 110 : 55, 35, 220),
-        frequency: rounded(kind === 'kick' ? 55 + cluster.centroid * 0.025 : cluster.centroid * 0.18, 48, 1_800),
+        decayMs: kind === 'kick' ? 105 : kind === 'snare' ? 80 : 55,
+        frequency: relativeFrequencies[orderedIndex] ?? 220,
         kind,
-        noiseAmount: clamp(kind === 'kick' ? cluster.flatness * 0.35 : 0.45 + cluster.flatness, 0, 1),
+        noiseAmount: 0,
         volume: clamp(0.08 + cluster.rms * 2.4, 0.08, 0.28),
       },
     };
   });
 
-  return { bpm, lanes, masterVolume: 0.55, stepCount, stepsPerBeat };
+  return {
+    bpm,
+    durationMs: rounded((onsets[onsets.length - 1] ?? origin) - origin + 260, 300, features.durationMs + 300),
+    lanes,
+    masterVolume: 0.55,
+    stepCount,
+    stepsPerBeat,
+  };
 };
 
 const frequencyToMidi = (frequency: number): number => 69 + 12 * Math.log2(frequency / 440);
@@ -426,7 +520,7 @@ export const generateResult = (
       engine: features.engine,
       features,
       mode,
-      summary: `${config.lanes.length} sound lanes on a ${config.stepCount}-step grid at ${config.bpm} BPM.`,
+      summary: `${config.lanes.length} peak-matched sounds with ${features.onsetTimesMs.length} hits at their recorded timing.`,
     };
   }
   const config = melodyConfig(features);

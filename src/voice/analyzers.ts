@@ -1,6 +1,7 @@
 import Meyda from 'meyda';
 import {
   clamp,
+  detectBeatPeaks,
   detectOnsets,
   detectPitchTrack,
   framePeak,
@@ -78,7 +79,10 @@ const aggregateFeatures = (
     engine,
     flatness: weightedMean(selected.map((frame) => frame.flatness)),
     frames,
-    onsetTimesMs: detectOnsets(frames, minimumGap),
+    onsetTimesMs:
+      mode === 'beat'
+        ? detectBeatPeaks(frames, minimumGap)
+        : detectOnsets(frames, minimumGap),
     peak: framePeak(samples),
     pitch,
     pitchCurve,

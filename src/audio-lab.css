@@ -79,6 +79,24 @@ button:disabled {
   gap: 18px;
 }
 
+.app-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.version-badge {
+  border: 1px solid rgba(144, 224, 216, 0.34);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #90e0d8;
+  background: rgba(9, 12, 18, 0.5);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
 .app-header h1,
 .editor-heading h2,
 .reference-panel h2 {
@@ -342,6 +360,53 @@ button:disabled {
   color: #8fa0b4;
 }
 
+.recording-filters {
+  border: 1px solid rgba(190, 216, 218, 0.18);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 16px;
+}
+
+.recording-filters legend {
+  font-weight: 700;
+  padding: 0 6px;
+}
+
+.recording-filters > p {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.recording-filter-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recording-filter-grid label {
+  display: grid;
+  font-size: 0.78rem;
+  gap: 5px;
+}
+
+.recording-filter-grid input {
+  background: rgba(6, 11, 18, 0.72);
+  border: 1px solid rgba(190, 216, 218, 0.28);
+  border-radius: 8px;
+  color: #e9eef8;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+@media (max-width: 560px) {
+  .recording-filter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .voice-results-panel {
   display: grid;
   min-height: 0;
@@ -460,6 +525,127 @@ button:disabled {
 
 .beat-hit.is-on {
   background: #90e0d8;
+}
+
+.beat-event-editor {
+  border-top: 1px solid rgba(190, 216, 218, 0.14);
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.beat-editor-heading {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.beat-editor-heading p {
+  color: #8fa0b4;
+  font-size: 0.75rem;
+  margin: 4px 0 0;
+}
+
+.suggested-sounds,
+.beat-events {
+  display: grid;
+  gap: 7px;
+}
+
+.beat-timing-editor {
+  align-items: end;
+  background: rgba(5, 8, 14, 0.44);
+  border: 1px solid rgba(190, 216, 218, 0.14);
+  border-radius: 7px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  padding: 9px;
+}
+
+.beat-timing-editor label {
+  color: #8fa0b4;
+  display: grid;
+  font-size: 0.68rem;
+  gap: 4px;
+}
+
+.beat-timing-editor input,
+.beat-timing-editor select {
+  background: rgba(6, 11, 18, 0.72);
+  border: 1px solid rgba(190, 216, 218, 0.28);
+  border-radius: 6px;
+  color: #e9eef8;
+  padding: 6px 7px;
+  width: 100%;
+}
+
+.suggested-sound {
+  background: rgba(5, 8, 14, 0.44);
+  border: 1px solid rgba(190, 216, 218, 0.14);
+  border-radius: 7px;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+}
+
+.beat-editor-fields {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.beat-editor-fields label {
+  color: #8fa0b4;
+  display: grid;
+  font-size: 0.68rem;
+  gap: 4px;
+}
+
+.beat-editor-fields input,
+.beat-event-row input {
+  background: rgba(6, 11, 18, 0.72);
+  border: 1px solid rgba(190, 216, 218, 0.28);
+  border-radius: 6px;
+  color: #e9eef8;
+  min-width: 0;
+  padding: 6px 7px;
+  width: 100%;
+}
+
+.beat-event-row {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 24px minmax(80px, 1fr) 76px 68px auto;
+}
+
+.beat-event-row > strong {
+  color: #8fa0b4;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .beat-editor-heading {
+    display: grid;
+  }
+
+  .beat-editor-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .beat-timing-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .beat-event-row {
+    grid-template-columns: 20px 1fr 68px;
+  }
+
+  .beat-event-row button {
+    grid-column: 2 / -1;
+  }
 }
 
 .sound-list-panel,
@@ -649,6 +835,31 @@ button:disabled {
 .layer-subgrid {
   display: grid;
   gap: 12px;
+}
+
+.resonance-editor {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid rgba(190, 216, 218, 0.16);
+  padding-top: 12px;
+}
+
+.resonance-editor h4 {
+  margin: 0;
+  color: #ffffff;
+}
+
+.resonance-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(190, 216, 218, 0.14);
+  border-radius: 7px;
+  padding: 10px;
+}
+
+.resonance-row strong {
+  color: #c9d7e7;
+  font-size: 0.8rem;
 }
 
 .processor-placeholder {
