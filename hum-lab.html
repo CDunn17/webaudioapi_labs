@@ -174,10 +174,45 @@
             <div class="preview-modal-selection" id="preview-modal-selection"></div>
             <div class="preview-modal-playhead" id="preview-modal-playhead"></div>
           </div>
+          <div class="preview-mixer">
+            <div class="preview-channel">
+              <label class="preview-source-select">
+                <span>Procedural result</span>
+                <select id="preview-result-select"></select>
+              </label>
+              <label class="preview-volume">
+                <span>Volume</span>
+                <input id="preview-result-volume" type="range" min="0" max="1" step="0.01" value="0.8" />
+              </label>
+              <label class="preview-mute">
+                <input id="preview-result-mute" type="checkbox" />
+                <span>Mute</span>
+              </label>
+            </div>
+            <div class="preview-channel">
+              <label class="preview-source-toggle">
+                <input id="preview-original-enabled" type="checkbox" />
+                <span>Overlay original recording</span>
+              </label>
+              <label class="preview-volume">
+                <span>Volume</span>
+                <input id="preview-original-volume" type="range" min="0" max="1" step="0.01" value="0.8" />
+              </label>
+              <label class="preview-mute">
+                <input id="preview-original-mute" type="checkbox" />
+                <span>Mute</span>
+              </label>
+            </div>
+          </div>
           <div class="preview-modal-footer">
             <span id="preview-modal-time">0.0s</span>
-            <button class="primary-button" id="preview-modal-stop" type="button">Stop preview</button>
+            <div class="transport-row">
+              <button class="primary-button" id="preview-modal-play" type="button">Play</button>
+              <button class="secondary-button" id="preview-modal-stop" type="button">Stop</button>
+            </div>
           </div>
+          <audio id="preview-modal-audio" autoplay hidden></audio>
+          <audio id="preview-original-audio" hidden></audio>
         </div>
       </div>
     </main>

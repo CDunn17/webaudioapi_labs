@@ -12,16 +12,20 @@ export class ProceduralPreview {
   private audioContext: AudioContext | undefined;
   private completionTimer: number | undefined;
   private master: GainNode | undefined;
+  private mediaDestination: MediaStreamAudioDestinationNode | undefined;
   private progressFrame: number | undefined;
   private sources: AudioScheduledSourceNode[] = [];
+
+  constructor(private readonly mediaElement?: HTMLAudioElement) {}
 
   async play(
     result: ProceduralResult,
     onProgress: (elapsedMs: number) => void,
     onComplete: () => void
   ): Promise<void> {
-    this.stop();
+    this.clear(true);
     let context = this.context();
+    const mediaPlayback = this.mediaElement?.play();
     if (context.state !== 'running') await context.resume();
     if (context.state !== 'running') {
       await context.close().catch(() => undefined);
@@ -32,10 +36,11 @@ export class ProceduralPreview {
     if (context.state !== 'running') {
       throw new Error(`Audio output could not start (${context.state}).`);
     }
+    await mediaPlayback;
     const startAt = context.currentTime + 0.06;
     this.master = context.createGain();
     this.master.gain.value = 0.8;
-    this.master.connect(context.destination);
+    this.master.connect(this.mediaDestination ?? context.destination);
 
     let durationMs: number;
     if (result.mode === 'effect') {
@@ -67,12 +72,15 @@ export class ProceduralPreview {
 
   stop(): void {
     this.clear(true);
+    this.mediaElement?.pause();
   }
 
   close(): void {
     this.stop();
     const context = this.audioContext;
     this.audioContext = undefined;
+    this.mediaDestination = undefined;
+    if (this.mediaElement !== undefined) this.mediaElement.srcObject = null;
     if (context !== undefined && context.state !== 'closed') {
       void context.close().catch(() => undefined);
     }
@@ -81,6 +89,10 @@ export class ProceduralPreview {
   private context(): AudioContext {
     if (this.audioContext === undefined || this.audioContext.state === 'closed') {
       this.audioContext = new AudioContext();
+      if (this.mediaElement !== undefined) {
+        this.mediaDestination = this.audioContext.createMediaStreamDestination();
+        this.mediaElement.srcObject = this.mediaDestination.stream;
+      }
     }
     return this.audioContext;
   }

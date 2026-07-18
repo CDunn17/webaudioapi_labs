@@ -10,7 +10,12 @@
     "dev": "vite --host 127.0.0.1",
     "lint": "eslint 'src/**/*.ts'",
     "preview": "vite preview --host 127.0.0.1",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "version:major": "npm version major --no-git-tag-version",
+    "version:minor": "npm version minor --no-git-tag-version",
+    "version:patch": "npm version patch --no-git-tag-version",
+    "version:prerelease": "npm version prerelease --preid=beta --no-git-tag-version",
+    "version:show": "npm pkg get version"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

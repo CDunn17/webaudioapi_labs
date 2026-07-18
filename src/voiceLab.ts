@@ -1,7 +1,7 @@
 import { analysisAdapter, analysisEngineLabel } from './voice/analyzers';
 import { frameRms } from './voice/dsp';
 import { fitEffectConfig } from './voice/fit';
-import { combineMelodyResults } from './voice/fusion';
+import { combineProceduralResults } from './voice/fusion';
 import { generateResult } from './voice/generators';
 import { ProceduralPreview } from './voice/preview';
 import type {
@@ -11,7 +11,6 @@ import type {
   CreationMode,
   ProceduralResult,
   ResultEngineId,
-  MelodyResult,
 } from './voice/types';
 
 type ModeDetails = {
@@ -78,12 +77,21 @@ const filterMaxHandle = document.getElementById('filter-max-handle');
 const previewModal = document.getElementById('preview-modal');
 const previewModalTitle = document.getElementById('preview-modal-title');
 const previewModalClose = document.getElementById('preview-modal-close');
+const previewModalPlay = document.getElementById('preview-modal-play');
 const previewModalStop = document.getElementById('preview-modal-stop');
 const previewModalWaveform = document.getElementById('preview-modal-waveform');
 const previewModalCanvas = document.getElementById('preview-modal-canvas');
 const previewModalSelection = document.getElementById('preview-modal-selection');
 const previewModalPlayhead = document.getElementById('preview-modal-playhead');
 const previewModalTime = document.getElementById('preview-modal-time');
+const previewModalAudio = document.getElementById('preview-modal-audio');
+const previewOriginalAudio = document.getElementById('preview-original-audio');
+const previewResultSelect = document.getElementById('preview-result-select');
+const previewResultVolume = document.getElementById('preview-result-volume');
+const previewResultMute = document.getElementById('preview-result-mute');
+const previewOriginalEnabled = document.getElementById('preview-original-enabled');
+const previewOriginalVolume = document.getElementById('preview-original-volume');
+const previewOriginalMute = document.getElementById('preview-original-mute');
 
 if (
   appVersion === null ||
@@ -125,12 +133,21 @@ if (
   || !(previewModal instanceof HTMLDivElement)
   || previewModalTitle === null
   || !(previewModalClose instanceof HTMLButtonElement)
+  || !(previewModalPlay instanceof HTMLButtonElement)
   || !(previewModalStop instanceof HTMLButtonElement)
   || !(previewModalWaveform instanceof HTMLDivElement)
   || !(previewModalCanvas instanceof HTMLCanvasElement)
   || !(previewModalSelection instanceof HTMLDivElement)
   || !(previewModalPlayhead instanceof HTMLDivElement)
   || previewModalTime === null
+  || !(previewModalAudio instanceof HTMLAudioElement)
+  || !(previewOriginalAudio instanceof HTMLAudioElement)
+  || !(previewResultSelect instanceof HTMLSelectElement)
+  || !(previewResultVolume instanceof HTMLInputElement)
+  || !(previewResultMute instanceof HTMLInputElement)
+  || !(previewOriginalEnabled instanceof HTMLInputElement)
+  || !(previewOriginalVolume instanceof HTMLInputElement)
+  || !(previewOriginalMute instanceof HTMLInputElement)
 ) {
   throw new Error('Voice Lab markup is missing required elements.');
 }
@@ -152,7 +169,9 @@ let limitTimer: number | undefined;
 let captureStartedAt = 0;
 let generatedResults: ProceduralResult[] = [];
 let activePreviewEngine: ResultEngineId | undefined;
-const preview = new ProceduralPreview();
+let previewElapsedMs = 0;
+let previewRunId = 0;
+const preview = new ProceduralPreview(previewModalAudio);
 
 const renderPreviewModalWaveform = (): void => {
   if (previewModal.hidden) return;
@@ -178,12 +197,21 @@ const renderPreviewModalWaveform = (): void => {
   previewModalSelection.style.width = `${Math.max(0, end - start)}%`;
 };
 
-const closePreviewModal = (): void => {
+const stopPreviewPlayback = (): void => {
+  previewRunId += 1;
   preview.stop();
+  previewOriginalAudio.pause();
   activePreviewEngine = undefined;
-  previewModal.hidden = true;
+  previewElapsedMs = 0;
+  previewModalTime.textContent = '0.0s';
+  previewModalPlayhead.style.left = '0%';
   filterPlayhead.classList.remove('is-playing');
   updatePreviewButtons();
+};
+
+const closePreviewModal = (): void => {
+  stopPreviewPlayback();
+  previewModal.hidden = true;
 };
 
 const filterHandles = {
@@ -540,13 +568,6 @@ const renderBeatEditor = (
   title.textContent = 'Review events and suggested sounds';
   guidance.textContent = 'Events with the same label use exactly the same digital sound.';
   headingText.append(title, guidance);
-  const reanalyze = document.createElement('button');
-  reanalyze.className = 'secondary-button';
-  reanalyze.type = 'button';
-  reanalyze.textContent = 'Re-analyze recording';
-  reanalyze.addEventListener('click', () => void generateConfigs());
-  const headingActions = document.createElement('div');
-  headingActions.className = 'transport-row';
   const addEvent = document.createElement('button');
   addEvent.className = 'secondary-button';
   addEvent.type = 'button';
@@ -562,8 +583,8 @@ const renderBeatEditor = (
     rebuildBeatGroups(result.config);
     renderResults();
   });
-  headingActions.append(addEvent, reanalyze);
-  heading.append(headingText, headingActions);
+  addEvent.hidden = true;
+  heading.append(headingText, addEvent);
   editor.append(heading);
 
   const timing = document.createElement('div');
@@ -602,6 +623,7 @@ const renderBeatEditor = (
     renderResults();
   });
   timing.append(subdivisionLabel, strengthLabel, applyTiming);
+  timing.hidden = true;
   editor.append(timing);
 
   const sounds = document.createElement('div');
@@ -684,11 +706,10 @@ const renderBeatEditor = (
 
 const updatePreviewButtons = (): void => {
   document.querySelectorAll<HTMLButtonElement>('[data-preview-engine]').forEach((button) => {
-    button.textContent = button.dataset.previewEngine === activePreviewEngine ? 'Stop preview' : 'Preview config';
+    button.textContent = button.dataset.previewEngine === activePreviewEngine ? 'Stop preview' : 'Preview audio';
   });
   if (activePreviewEngine === undefined) {
     filterPlayhead.classList.remove('is-playing');
-    previewModal.hidden = true;
   }
 };
 
@@ -707,6 +728,69 @@ const updateFilterPlayhead = (result: ProceduralResult, elapsedMs: number): void
   filterPlayhead.classList.add('is-playing');
   previewModalPlayhead.style.left = `${Math.max(0, Math.min(100, positionPercent))}%`;
   previewModalTime.textContent = `${(Math.max(0, elapsedMs) / 1000).toFixed(1)}s`;
+};
+
+const playOriginalOverlay = (result: ProceduralResult, elapsedMs = 0): void => {
+  if (!previewOriginalEnabled.checked || recordingUrl === undefined) {
+    previewOriginalAudio.pause();
+    return;
+  }
+  const duration = decodedRecording?.duration ?? 0;
+  const startSeconds = filterNumber(filterStartInput, 0)
+    + Math.max(0, result.features.sourceStartMs + elapsedMs) / 1000;
+  previewOriginalAudio.currentTime = Math.max(0, Math.min(duration, startSeconds));
+  void previewOriginalAudio.play().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    captureMessage.value = `Original recording preview failed: ${message}`;
+  });
+};
+
+const startModalResult = (result: ProceduralResult): void => {
+  previewRunId += 1;
+  const runId = previewRunId;
+  preview.stop();
+  previewOriginalAudio.pause();
+  recordingPlayback.pause();
+  activePreviewEngine = result.engine;
+  previewResultSelect.value = result.engine;
+  previewModalTitle.textContent = analysisEngineLabel(result.engine);
+  previewModalTime.textContent = '0.0s';
+  previewModalPlayhead.style.left = '0%';
+  updatePreviewButtons();
+  const playCycle = (): void => {
+    if (runId !== previewRunId || activePreviewEngine !== result.engine) return;
+    previewElapsedMs = 0;
+    playOriginalOverlay(result);
+    void preview.play(
+      result,
+      (elapsedMs) => {
+        previewElapsedMs = elapsedMs;
+        updateFilterPlayhead(result, elapsedMs);
+      },
+      playCycle
+    ).catch((error: unknown) => {
+      stopPreviewPlayback();
+      const message = error instanceof Error ? error.message : String(error);
+      captureMessage.value = `${analysisEngineLabel(result.engine)} preview failed: ${message}`;
+    });
+  };
+  playCycle();
+};
+
+const openPreviewModal = (result: ProceduralResult): void => {
+  previewResultSelect.replaceChildren(...generatedResults.map((candidate) => {
+    const option = document.createElement('option');
+    option.value = candidate.engine;
+    option.textContent = analysisEngineLabel(candidate.engine);
+    return option;
+  }));
+  previewOriginalEnabled.disabled = recordingUrl === undefined;
+  if (recordingUrl !== undefined && previewOriginalAudio.src !== recordingUrl) {
+    previewOriginalAudio.src = recordingUrl;
+  }
+  previewModal.hidden = false;
+  window.requestAnimationFrame(renderPreviewModalWaveform);
+  startModalResult(result);
 };
 
 const renderResults = (): void => {
@@ -765,37 +849,10 @@ const renderResults = (): void => {
     previewButton.className = 'primary-button';
     previewButton.dataset.previewEngine = result.engine;
     previewButton.type = 'button';
-    previewButton.textContent = 'Preview config';
+    previewButton.textContent = 'Preview audio';
     previewButton.disabled = result.mode === 'melody' && result.config.notes.length === 0;
     previewButton.addEventListener('click', () => {
-      if (activePreviewEngine === result.engine) {
-        closePreviewModal();
-        return;
-      }
-      recordingPlayback.pause();
-      activePreviewEngine = result.engine;
-      previewModalTitle.textContent = analysisEngineLabel(result.engine);
-      previewModalTime.textContent = '0.0s';
-      previewModalPlayhead.style.left = '0%';
-      previewModal.hidden = false;
-      window.requestAnimationFrame(renderPreviewModalWaveform);
-      updatePreviewButtons();
-      const playCycle = (): void => {
-        if (activePreviewEngine !== result.engine) return;
-        void preview.play(
-          result,
-          (elapsedMs) => updateFilterPlayhead(result, elapsedMs),
-          playCycle
-        ).catch((error: unknown) => {
-          preview.stop();
-          activePreviewEngine = undefined;
-          previewModal.hidden = true;
-          updatePreviewButtons();
-          const message = error instanceof Error ? error.message : String(error);
-          captureMessage.value = `${analysisEngineLabel(result.engine)} preview failed: ${message}`;
-        });
-      };
-      playCycle();
+      openPreviewModal(result);
     });
     const copyButton = document.createElement('button');
     copyButton.className = 'secondary-button';
@@ -812,11 +869,22 @@ const renderResults = (): void => {
         }
       );
     });
-    actions.append(previewButton, copyButton);
-
     const config = document.createElement('pre');
     config.className = 'config-preview';
+    config.hidden = true;
     config.textContent = formatConfig(result);
+    const viewConfigButton = document.createElement('button');
+    viewConfigButton.className = 'secondary-button';
+    viewConfigButton.type = 'button';
+    viewConfigButton.textContent = 'View config';
+    viewConfigButton.setAttribute('aria-expanded', 'false');
+    viewConfigButton.addEventListener('click', () => {
+      config.hidden = !config.hidden;
+      viewConfigButton.textContent = config.hidden ? 'View config' : 'Hide config';
+      viewConfigButton.setAttribute('aria-expanded', `${!config.hidden}`);
+    });
+    actions.append(previewButton, viewConfigButton, copyButton);
+
     card.append(header, metrics);
     if (result.mode === 'beat') card.append(renderBeatLanes(result), renderBeatEditor(result));
     card.append(actions, config);
@@ -1007,19 +1075,14 @@ const generateConfigs = async (): Promise<void> => {
       captureMessage.value = `${adapter.label} could not analyze this recording: ${message}`;
     }
   }
-  if (selectedMode === 'melody') {
-    const melodyResults = generatedResults.filter(
-      (result): result is MelodyResult => result.mode === 'melody' && result.engine !== 'combined'
-    );
-    if (melodyResults.length >= 2) {
-      const combined = combineMelodyResults(melodyResults);
-      if (combined !== undefined) generatedResults.push(combined);
-    }
-  }
+  const combined = combineProceduralResults(generatedResults);
+  if (combined !== undefined) generatedResults.push(combined);
   analyzeButton.disabled = false;
   setResultStatus(generatedResults.length > 0 ? 'Generated' : 'Try again');
-  resultsSummary.textContent = generatedResults.length > 1
-    ? 'Compare how each open-source analysis engine shaped the procedural result.'
+  resultsSummary.textContent = generatedResults.some((result) => result.engine === 'combined')
+    ? 'Compare the individual engines with the fused final result.'
+    : generatedResults.length > 1
+      ? 'Compare how each open-source analysis engine shaped the procedural result.'
     : 'Preview the generated sound and copy its editable configuration.';
   renderResults();
 };
@@ -1094,7 +1157,35 @@ resetFiltersButton.addEventListener('click', () => {
     : 'Analysis filter reset. Generate configs to apply it.';
 });
 previewModalClose.addEventListener('click', closePreviewModal);
-previewModalStop.addEventListener('click', closePreviewModal);
+previewModalPlay.addEventListener('click', () => {
+  const result = generatedResults.find((candidate) => candidate.engine === previewResultSelect.value);
+  if (result !== undefined) startModalResult(result);
+});
+previewModalStop.addEventListener('click', stopPreviewPlayback);
+previewResultSelect.addEventListener('change', () => {
+  const result = generatedResults.find((candidate) => candidate.engine === previewResultSelect.value);
+  if (result !== undefined) startModalResult(result);
+});
+previewResultVolume.addEventListener('input', () => {
+  previewModalAudio.volume = Number(previewResultVolume.value);
+});
+previewResultMute.addEventListener('change', () => {
+  previewModalAudio.muted = previewResultMute.checked;
+});
+previewOriginalEnabled.addEventListener('change', () => {
+  const result = generatedResults.find((candidate) => candidate.engine === previewResultSelect.value);
+  if (previewOriginalEnabled.checked && result !== undefined && activePreviewEngine !== undefined) {
+    playOriginalOverlay(result, previewElapsedMs);
+  } else {
+    previewOriginalAudio.pause();
+  }
+});
+previewOriginalVolume.addEventListener('input', () => {
+  previewOriginalAudio.volume = Number(previewOriginalVolume.value);
+});
+previewOriginalMute.addEventListener('change', () => {
+  previewOriginalAudio.muted = previewOriginalMute.checked;
+});
 previewModal.addEventListener('click', (event) => {
   if (event.target === previewModal) closePreviewModal();
 });
@@ -1110,6 +1201,10 @@ for (const input of [filterStartInput, filterEndInput, filterMinLevelInput, filt
 }
 new ResizeObserver(renderFilterVisual).observe(filterVisual);
 new ResizeObserver(renderPreviewModalWaveform).observe(previewModalWaveform);
+previewModalAudio.volume = Number(previewResultVolume.value);
+previewModalAudio.muted = previewResultMute.checked;
+previewOriginalAudio.volume = Number(previewOriginalVolume.value);
+previewOriginalAudio.muted = previewOriginalMute.checked;
 window.addEventListener('pagehide', () => {
   cleanCaptureResources();
   preview.close();

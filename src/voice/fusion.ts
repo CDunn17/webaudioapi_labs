@@ -1,5 +1,12 @@
 import { clamp, mean, median } from './dsp';
-import type { MelodyNote, MelodyResult, ResultEngineId } from './types';
+import { generateResult } from './generators';
+import type {
+  AudioFeatures,
+  MelodyNote,
+  MelodyResult,
+  ProceduralResult,
+  ResultEngineId,
+} from './types';
 
 const ENGINE_WEIGHT: Record<ResultEngineId, number> = {
   basicPitch: 4,
@@ -111,4 +118,66 @@ export const combineMelodyResults = (results: MelodyResult[]): MelodyResult | un
     mode: 'melody',
     summary: `${notes.length} consensus notes using ${source.engine === 'basicPitch' ? 'Basic Pitch' : source.engine} boundaries, confidence-weighted pitch, and ${timbreSource.engine} timbre.`,
   };
+};
+
+const consensusOnsets = (results: ProceduralResult[]): number[] => {
+  const tolerance = results[0]?.mode === 'beat' ? 85 : 50;
+  const events = results.flatMap((result) => result.features.onsetTimesMs.map((time) => ({
+    engine: result.engine,
+    time,
+  }))).sort((first, second) => first.time - second.time);
+  const clusters: typeof events[] = [];
+  for (const event of events) {
+    const cluster = clusters[clusters.length - 1];
+    if (cluster === undefined || event.time - (cluster[cluster.length - 1]?.time ?? 0) > tolerance) {
+      clusters.push([event]);
+    } else {
+      cluster.push(event);
+    }
+  }
+  const consensus = clusters
+    .filter((cluster) => new Set(cluster.map((event) => event.engine)).size >= 2)
+    .map((cluster) => Math.round(median(cluster.map((event) => event.time))));
+  if (consensus.length > 0) return consensus;
+  return [...results].sort(
+    (first, second) => second.features.onsetTimesMs.length - first.features.onsetTimesMs.length
+  )[0]?.features.onsetTimesMs ?? [];
+};
+
+const combineFeatures = (results: ProceduralResult[]): AudioFeatures => {
+  const source = results.find((result) => result.engine === 'meyda') ?? results[0]!;
+  return {
+    ...source.features,
+    centroidHz: median(results.map((result) => result.features.centroidHz)),
+    durationMs: Math.max(...results.map((result) => result.features.durationMs)),
+    engine: 'combined',
+    flatness: median(results.map((result) => result.features.flatness)),
+    onsetTimesMs: consensusOnsets(results),
+    peak: median(results.map((result) => result.features.peak)),
+    pitch: results.flatMap((result) => result.features.pitch),
+    rms: median(results.map((result) => result.features.rms)),
+    rolloffHz: median(results.map((result) => result.features.rolloffHz)),
+    sourceEndMs: Math.max(...results.map((result) => result.features.sourceEndMs)),
+    sourceStartMs: Math.min(...results.map((result) => result.features.sourceStartMs)),
+    zcr: median(results.map((result) => result.features.zcr)),
+  };
+};
+
+export const combineProceduralResults = (
+  results: ProceduralResult[]
+): ProceduralResult | undefined => {
+  const individual = results.filter((result) => result.engine !== 'combined');
+  if (individual.length < 2) return undefined;
+  if (individual.every((result) => result.mode === 'melody')) {
+    return combineMelodyResults(individual as MelodyResult[]);
+  }
+  const mode = individual[0]?.mode;
+  if (mode === undefined || individual.some((result) => result.mode !== mode)) return undefined;
+  const combined = generateResult(mode, combineFeatures(individual));
+  if (combined.mode === 'beat') {
+    combined.summary = `${combined.features.onsetTimesMs.length} consensus hits with Meyda timbre and cross-engine timing. Thresholds require support from at least two engines when available.`;
+  } else if (combined.mode === 'effect') {
+    combined.summary = `${combined.config.layers.length} fused layers using consensus events, median spectral features, shared dynamics, and combined pitch evidence.`;
+  }
+  return combined;
 };

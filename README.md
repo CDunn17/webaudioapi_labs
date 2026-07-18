@@ -52,6 +52,22 @@ Install dependencies:
 npm install
 ```
 
+## Versioning
+
+The app version uses the standard SemVer value in `package.json` as its single source of truth. Vite injects that value into the Voice Lab version badge at build time, and npm keeps `package.json` and `package-lock.json` synchronized.
+
+Use one of these commands when preparing a new version:
+
+```sh
+npm run version:patch       # 0.0.2 -> 0.0.3
+npm run version:minor       # 0.0.2 -> 0.1.0
+npm run version:major       # 0.0.2 -> 1.0.0
+npm run version:prerelease  # 0.0.2 -> 0.0.3-beta.0
+npm run version:show
+```
+
+These commands intentionally do not create a Git commit or tag. Commit the synchronized manifest changes with the related release, then add a Git tag separately when desired.
+
 Run the labs:
 
 ```sh

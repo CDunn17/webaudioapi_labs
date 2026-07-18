@@ -493,6 +493,69 @@ button:disabled {
   pointer-events: none;
 }
 
+.preview-mixer {
+  display: grid;
+  gap: 10px;
+}
+
+.preview-channel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.8fr) auto;
+  align-items: end;
+  gap: 14px;
+  border: 1px solid rgba(190, 216, 218, 0.18);
+  border-radius: 9px;
+  padding: 12px;
+  background: rgba(6, 11, 18, 0.46);
+}
+
+.preview-source-select,
+.preview-volume {
+  display: grid;
+  gap: 6px;
+  color: #aebdd0;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.preview-source-select select {
+  width: 100%;
+  border: 1px solid rgba(190, 216, 218, 0.3);
+  border-radius: 7px;
+  padding: 8px;
+  color: #f8fbff;
+  background: #0b111c;
+}
+
+.preview-volume input {
+  width: 100%;
+  accent-color: #90e0d8;
+}
+
+.preview-source-toggle,
+.preview-mute {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: #cfdae8;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.preview-source-toggle input,
+.preview-mute input {
+  width: 17px;
+  height: 17px;
+  accent-color: #90e0d8;
+}
+
+@media (max-width: 680px) {
+  .preview-channel {
+    grid-template-columns: 1fr;
+  }
+}
+
 .preview-modal-selection {
   border-inline: 1px solid rgba(144, 224, 216, 0.55);
   background: rgba(144, 224, 216, 0.08);
@@ -717,6 +780,10 @@ button:disabled {
   max-height: 360px;
 }
 
+.voice-result-card .config-preview[hidden] {
+  display: none;
+}
+
 .beat-lanes {
   display: grid;
   gap: 6px;
@@ -782,6 +849,11 @@ button:disabled {
   gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   padding: 9px;
+}
+
+.beat-timing-editor[hidden],
+.beat-editor-heading button[hidden] {
+  display: none;
 }
 
 .beat-timing-editor label {

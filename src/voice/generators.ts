@@ -87,7 +87,9 @@ const effectConfig = (features: AudioFeatures): LayeredSoundConfig => {
     14_000
   );
   const volume = clamp(0.08 + features.rms * 1.7, 0.08, 0.34);
-  const engineId = features.engine === 'webAudio' ? 'web-audio' : 'meyda';
+  const engineId = features.engine === 'webAudio'
+    ? 'web-audio'
+    : features.engine === 'basicPitch' ? 'basic-pitch' : features.engine;
   const layers: SoundLayerConfig[] = [];
   const gainCurve = curveWithDuration(features.amplitudeCurve, durationMs, 0);
   const brightnessAutomation = filterCurve(features, durationMs);
