@@ -56,6 +56,8 @@ const resultsSummary = document.getElementById('results-summary');
 const voiceResults = document.getElementById('voice-results');
 const webAudioCheckbox = document.getElementById('engine-web-audio');
 const meydaCheckbox = document.getElementById('engine-meyda');
+const essentiaCheckbox = document.getElementById('engine-essentia');
+const basicPitchCheckbox = document.getElementById('engine-basic-pitch');
 const filterStartInput = document.getElementById('filter-start');
 const filterEndInput = document.getElementById('filter-end');
 const filterMinLevelInput = document.getElementById('filter-min-level');
@@ -83,6 +85,8 @@ if (
   voiceResults === null ||
   !(webAudioCheckbox instanceof HTMLInputElement) ||
   !(meydaCheckbox instanceof HTMLInputElement) ||
+  !(essentiaCheckbox instanceof HTMLInputElement) ||
+  !(basicPitchCheckbox instanceof HTMLInputElement) ||
   !(filterStartInput instanceof HTMLInputElement) ||
   !(filterEndInput instanceof HTMLInputElement) ||
   !(filterMinLevelInput instanceof HTMLInputElement) ||
@@ -181,6 +185,7 @@ const renderMode = (): void => {
   captureTitle.textContent = details.title;
   captureGuidance.textContent = details.guidance;
   captureLimit.textContent = `${details.limitMs / 1000}s`;
+  basicPitchCheckbox.disabled = selectedMode !== 'melody';
   for (const button of modeButtons) {
     const isSelected = button.dataset.mode === selectedMode;
     button.classList.toggle('is-active', isSelected);
@@ -200,6 +205,8 @@ const selectedEngines = (): AnalysisEngineId[] => {
   const engines: AnalysisEngineId[] = [];
   if (webAudioCheckbox.checked) engines.push('webAudio');
   if (meydaCheckbox.checked) engines.push('meyda');
+  if (essentiaCheckbox.checked) engines.push('essentia');
+  if (selectedMode === 'melody' && basicPitchCheckbox.checked) engines.push('basicPitch');
   return engines;
 };
 

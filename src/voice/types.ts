@@ -2,7 +2,7 @@ import type { AutomationPoint, LayeredSoundConfig } from '../config/audio';
 
 export type CreationMode = 'effect' | 'beat' | 'melody';
 
-export type AnalysisEngineId = 'webAudio' | 'meyda';
+export type AnalysisEngineId = 'webAudio' | 'meyda' | 'essentia' | 'basicPitch';
 
 export type FrameFeatures = {
   centroidHz: number;
@@ -37,6 +37,7 @@ export type AudioFeatures = {
   sourceEndMs: number;
   sourceStartMs: number;
   zcr: number;
+  transcribedNotes?: MelodyNote[];
 };
 
 export type BeatVoice = {

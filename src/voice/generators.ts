@@ -457,6 +457,7 @@ const beatConfig = (features: AudioFeatures): BeatConfig => {
 const frequencyToMidi = (frequency: number): number => 69 + 12 * Math.log2(frequency / 440);
 
 const melodyNotes = (features: AudioFeatures): MelodyNote[] => {
+  if (features.transcribedNotes !== undefined) return features.transcribedNotes.slice(0, 64);
   const notes: MelodyNote[] = [];
   let group: typeof features.pitch = [];
   const flush = (): void => {
