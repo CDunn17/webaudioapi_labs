@@ -1,6 +1,7 @@
 import { analysisAdapter, analysisEngineLabel } from './voice/analyzers';
 import { frameRms } from './voice/dsp';
 import { fitEffectConfig } from './voice/fit';
+import { combineMelodyResults } from './voice/fusion';
 import { generateResult } from './voice/generators';
 import { ProceduralPreview } from './voice/preview';
 import type {
@@ -9,6 +10,8 @@ import type {
   BeatLane,
   CreationMode,
   ProceduralResult,
+  ResultEngineId,
+  MelodyResult,
 } from './voice/types';
 
 type ModeDetails = {
@@ -72,6 +75,15 @@ const filterStartHandle = document.getElementById('filter-start-handle');
 const filterEndHandle = document.getElementById('filter-end-handle');
 const filterMinHandle = document.getElementById('filter-min-handle');
 const filterMaxHandle = document.getElementById('filter-max-handle');
+const previewModal = document.getElementById('preview-modal');
+const previewModalTitle = document.getElementById('preview-modal-title');
+const previewModalClose = document.getElementById('preview-modal-close');
+const previewModalStop = document.getElementById('preview-modal-stop');
+const previewModalWaveform = document.getElementById('preview-modal-waveform');
+const previewModalCanvas = document.getElementById('preview-modal-canvas');
+const previewModalSelection = document.getElementById('preview-modal-selection');
+const previewModalPlayhead = document.getElementById('preview-modal-playhead');
+const previewModalTime = document.getElementById('preview-modal-time');
 
 if (
   appVersion === null ||
@@ -110,6 +122,15 @@ if (
   || !(filterEndHandle instanceof HTMLButtonElement)
   || !(filterMinHandle instanceof HTMLButtonElement)
   || !(filterMaxHandle instanceof HTMLButtonElement)
+  || !(previewModal instanceof HTMLDivElement)
+  || previewModalTitle === null
+  || !(previewModalClose instanceof HTMLButtonElement)
+  || !(previewModalStop instanceof HTMLButtonElement)
+  || !(previewModalWaveform instanceof HTMLDivElement)
+  || !(previewModalCanvas instanceof HTMLCanvasElement)
+  || !(previewModalSelection instanceof HTMLDivElement)
+  || !(previewModalPlayhead instanceof HTMLDivElement)
+  || previewModalTime === null
 ) {
   throw new Error('Voice Lab markup is missing required elements.');
 }
@@ -130,8 +151,40 @@ let captureInterval: number | undefined;
 let limitTimer: number | undefined;
 let captureStartedAt = 0;
 let generatedResults: ProceduralResult[] = [];
-let activePreviewEngine: AnalysisEngineId | undefined;
+let activePreviewEngine: ResultEngineId | undefined;
 const preview = new ProceduralPreview();
+
+const renderPreviewModalWaveform = (): void => {
+  if (previewModal.hidden) return;
+  const bounds = previewModalWaveform.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  previewModalCanvas.width = Math.max(1, Math.round(bounds.width * ratio));
+  previewModalCanvas.height = Math.max(1, Math.round(bounds.height * ratio));
+  const context = previewModalCanvas.getContext('2d');
+  if (context !== null) {
+    context.clearRect(0, 0, previewModalCanvas.width, previewModalCanvas.height);
+    context.drawImage(
+      filterWaveform,
+      0,
+      0,
+      previewModalCanvas.width,
+      previewModalCanvas.height
+    );
+  }
+  const duration = decodedRecording?.duration ?? 0;
+  const start = duration > 0 ? filterNumber(filterStartInput, 0) / duration * 100 : 0;
+  const end = duration > 0 ? filterNumber(filterEndInput, duration) / duration * 100 : 100;
+  previewModalSelection.style.left = `${Math.max(0, start)}%`;
+  previewModalSelection.style.width = `${Math.max(0, end - start)}%`;
+};
+
+const closePreviewModal = (): void => {
+  preview.stop();
+  activePreviewEngine = undefined;
+  previewModal.hidden = true;
+  filterPlayhead.classList.remove('is-playing');
+  updatePreviewButtons();
+};
 
 const filterHandles = {
   end: filterEndHandle,
@@ -635,6 +688,7 @@ const updatePreviewButtons = (): void => {
   });
   if (activePreviewEngine === undefined) {
     filterPlayhead.classList.remove('is-playing');
+    previewModal.hidden = true;
   }
 };
 
@@ -651,6 +705,8 @@ const updateFilterPlayhead = (result: ProceduralResult, elapsedMs: number): void
   const positionPercent = positionMs / (duration * 1000) * 100;
   filterPlayhead.style.left = `${Math.max(0, Math.min(100, positionPercent))}%`;
   filterPlayhead.classList.add('is-playing');
+  previewModalPlayhead.style.left = `${Math.max(0, Math.min(100, positionPercent))}%`;
+  previewModalTime.textContent = `${(Math.max(0, elapsedMs) / 1000).toFixed(1)}s`;
 };
 
 const renderResults = (): void => {
@@ -663,6 +719,7 @@ const renderResults = (): void => {
   for (const result of generatedResults) {
     const card = document.createElement('article');
     card.className = 'voice-result-card';
+    card.classList.toggle('voice-result-combined', result.engine === 'combined');
     const header = document.createElement('div');
     header.className = 'voice-result-header';
     const heading = document.createElement('div');
@@ -672,7 +729,7 @@ const renderResults = (): void => {
     title.textContent = analysisEngineLabel(result.engine);
     summary.textContent = result.summary;
     badge.className = 'sound-kind';
-    badge.textContent = result.mode;
+    badge.textContent = result.engine === 'combined' ? 'Final' : result.mode;
     heading.append(title, summary);
     header.append(heading, badge);
 
@@ -712,23 +769,33 @@ const renderResults = (): void => {
     previewButton.disabled = result.mode === 'melody' && result.config.notes.length === 0;
     previewButton.addEventListener('click', () => {
       if (activePreviewEngine === result.engine) {
-        preview.stop();
-        activePreviewEngine = undefined;
-        updatePreviewButtons();
+        closePreviewModal();
         return;
       }
       recordingPlayback.pause();
       activePreviewEngine = result.engine;
+      previewModalTitle.textContent = analysisEngineLabel(result.engine);
+      previewModalTime.textContent = '0.0s';
+      previewModalPlayhead.style.left = '0%';
+      previewModal.hidden = false;
+      window.requestAnimationFrame(renderPreviewModalWaveform);
       updatePreviewButtons();
-      void preview.play(result, (elapsedMs) => {
-        updateFilterPlayhead(result, elapsedMs);
-      }).catch((error: unknown) => {
-        preview.stop();
-        activePreviewEngine = undefined;
-        updatePreviewButtons();
-        const message = error instanceof Error ? error.message : String(error);
-        captureMessage.value = `${analysisEngineLabel(result.engine)} preview failed: ${message}`;
-      });
+      const playCycle = (): void => {
+        if (activePreviewEngine !== result.engine) return;
+        void preview.play(
+          result,
+          (elapsedMs) => updateFilterPlayhead(result, elapsedMs),
+          playCycle
+        ).catch((error: unknown) => {
+          preview.stop();
+          activePreviewEngine = undefined;
+          previewModal.hidden = true;
+          updatePreviewButtons();
+          const message = error instanceof Error ? error.message : String(error);
+          captureMessage.value = `${analysisEngineLabel(result.engine)} preview failed: ${message}`;
+        });
+      };
+      playCycle();
     });
     const copyButton = document.createElement('button');
     copyButton.className = 'secondary-button';
@@ -940,6 +1007,15 @@ const generateConfigs = async (): Promise<void> => {
       captureMessage.value = `${adapter.label} could not analyze this recording: ${message}`;
     }
   }
+  if (selectedMode === 'melody') {
+    const melodyResults = generatedResults.filter(
+      (result): result is MelodyResult => result.mode === 'melody' && result.engine !== 'combined'
+    );
+    if (melodyResults.length >= 2) {
+      const combined = combineMelodyResults(melodyResults);
+      if (combined !== undefined) generatedResults.push(combined);
+    }
+  }
   analyzeButton.disabled = false;
   setResultStatus(generatedResults.length > 0 ? 'Generated' : 'Try again');
   resultsSummary.textContent = generatedResults.length > 1
@@ -1017,6 +1093,14 @@ resetFiltersButton.addEventListener('click', () => {
     ? ''
     : 'Analysis filter reset. Generate configs to apply it.';
 });
+previewModalClose.addEventListener('click', closePreviewModal);
+previewModalStop.addEventListener('click', closePreviewModal);
+previewModal.addEventListener('click', (event) => {
+  if (event.target === previewModal) closePreviewModal();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !previewModal.hidden) closePreviewModal();
+});
 for (const input of [filterStartInput, filterEndInput, filterMinLevelInput, filterMaxLevelInput]) {
   input.addEventListener('input', renderFilterVisual);
   input.addEventListener('change', () => {
@@ -1025,6 +1109,7 @@ for (const input of [filterStartInput, filterEndInput, filterMinLevelInput, filt
   });
 }
 new ResizeObserver(renderFilterVisual).observe(filterVisual);
+new ResizeObserver(renderPreviewModalWaveform).observe(previewModalWaveform);
 window.addEventListener('pagehide', () => {
   cleanCaptureResources();
   preview.close();

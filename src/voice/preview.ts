@@ -11,57 +11,61 @@ const midiToFrequency = (midi: number): number => 440 * 2 ** ((midi - 69) / 12);
 export class ProceduralPreview {
   private audioContext: AudioContext | undefined;
   private completionTimer: number | undefined;
-  private loopGeneration = 0;
   private master: GainNode | undefined;
   private progressFrame: number | undefined;
   private sources: AudioScheduledSourceNode[] = [];
 
-  async play(result: ProceduralResult, onProgress: (elapsedMs: number) => void): Promise<void> {
+  async play(
+    result: ProceduralResult,
+    onProgress: (elapsedMs: number) => void,
+    onComplete: () => void
+  ): Promise<void> {
     this.stop();
-    const context = this.context();
-    const generation = this.loopGeneration;
-    if (context.state === 'suspended') await context.resume();
-    if (generation !== this.loopGeneration) return;
-    const startCycle = (): void => {
-      if (generation !== this.loopGeneration) return;
-      const startAt = context.currentTime + 0.06;
-      this.master = context.createGain();
-      this.master.gain.value = 0.8;
-      this.master.connect(context.destination);
+    let context = this.context();
+    if (context.state !== 'running') await context.resume();
+    if (context.state !== 'running') {
+      await context.close().catch(() => undefined);
+      this.audioContext = undefined;
+      context = this.context();
+      await context.resume();
+    }
+    if (context.state !== 'running') {
+      throw new Error(`Audio output could not start (${context.state}).`);
+    }
+    const startAt = context.currentTime + 0.06;
+    this.master = context.createGain();
+    this.master.gain.value = 0.8;
+    this.master.connect(context.destination);
 
-      let durationMs: number;
-      if (result.mode === 'effect') {
-        if (this.master === undefined) return;
-        const rendered = renderEffectLayers(
-          context,
-          this.master,
-          result.config.layers,
-          startAt
-        );
-        this.sources.push(...rendered.sources);
-        durationMs = rendered.durationMs;
-      } else if (result.mode === 'beat') {
-        durationMs = this.playBeat(result.config, startAt);
-      } else {
-        durationMs = this.playMelody(result.config, startAt);
-      }
-      const updateProgress = (): void => {
-        if (generation !== this.loopGeneration) return;
-        onProgress(Math.max(0, (context.currentTime - startAt) * 1000));
-        this.progressFrame = window.requestAnimationFrame(updateProgress);
-      };
-      updateProgress();
-      const safeDurationMs = Number.isFinite(durationMs) ? Math.max(120, durationMs) : 1_000;
-      this.completionTimer = window.setTimeout(() => {
-        this.clear(false);
-        if (generation === this.loopGeneration) startCycle();
-      }, safeDurationMs + 100);
+    let durationMs: number;
+    if (result.mode === 'effect') {
+      if (this.master === undefined) return;
+      const rendered = renderEffectLayers(
+        context,
+        this.master,
+        result.config.layers,
+        startAt
+      );
+      this.sources.push(...rendered.sources);
+      durationMs = rendered.durationMs;
+    } else if (result.mode === 'beat') {
+      durationMs = this.playBeat(result.config, startAt);
+    } else {
+      durationMs = this.playMelody(result.config, startAt);
+    }
+    const updateProgress = (): void => {
+      onProgress(Math.max(0, (context.currentTime - startAt) * 1000));
+      this.progressFrame = window.requestAnimationFrame(updateProgress);
     };
-    startCycle();
+    updateProgress();
+    const safeDurationMs = Number.isFinite(durationMs) ? Math.max(120, durationMs) : 1_000;
+    this.completionTimer = window.setTimeout(() => {
+      this.clear(false);
+      onComplete();
+    }, safeDurationMs + 100);
   }
 
   stop(): void {
-    this.loopGeneration += 1;
     this.clear(true);
   }
 

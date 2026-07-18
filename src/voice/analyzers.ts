@@ -20,6 +20,7 @@ import type {
   CreationMode,
   FrameFeatures,
   PitchPoint,
+  ResultEngineId,
 } from './types';
 
 const FRAME_SIZE = 2048;
@@ -449,5 +450,5 @@ export const ANALYSIS_ADAPTERS: AnalysisAdapter[] = [
 export const analysisAdapter = (id: AnalysisAdapter['id']): AnalysisAdapter | undefined =>
   ANALYSIS_ADAPTERS.find((adapter) => adapter.id === id);
 
-export const analysisEngineLabel = (id: AnalysisAdapter['id']): string =>
-  analysisAdapter(id)?.label ?? id;
+export const analysisEngineLabel = (id: ResultEngineId): string =>
+  id === 'combined' ? 'Combined result' : analysisAdapter(id)?.label ?? id;

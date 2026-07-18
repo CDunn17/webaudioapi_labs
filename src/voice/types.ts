@@ -3,6 +3,7 @@ import type { AutomationPoint, LayeredSoundConfig } from '../config/audio';
 export type CreationMode = 'effect' | 'beat' | 'melody';
 
 export type AnalysisEngineId = 'webAudio' | 'meyda' | 'essentia' | 'basicPitch';
+export type ResultEngineId = AnalysisEngineId | 'combined';
 
 export type FrameFeatures = {
   centroidHz: number;
@@ -25,7 +26,7 @@ export type AudioFeatures = {
   brightnessCurve: AutomationPoint[];
   centroidHz: number;
   durationMs: number;
-  engine: AnalysisEngineId;
+  engine: ResultEngineId;
   flatness: number;
   frames: FrameFeatures[];
   onsetTimesMs: number[];
@@ -79,7 +80,7 @@ export type MelodyConfig = {
 };
 
 type ProceduralResultBase = {
-  engine: AnalysisEngineId;
+  engine: ResultEngineId;
   features: AudioFeatures;
   summary: string;
 };

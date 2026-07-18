@@ -159,6 +159,27 @@
           <div class="voice-results" id="voice-results"></div>
         </section>
       </section>
+
+      <div class="preview-modal" id="preview-modal" hidden role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
+        <div class="preview-modal-card">
+          <div class="preview-modal-heading">
+            <div>
+              <span>Config preview</span>
+              <h2 id="preview-modal-title">Preview</h2>
+            </div>
+            <button class="secondary-button" id="preview-modal-close" type="button">Close</button>
+          </div>
+          <div class="preview-modal-waveform" id="preview-modal-waveform">
+            <canvas id="preview-modal-canvas"></canvas>
+            <div class="preview-modal-selection" id="preview-modal-selection"></div>
+            <div class="preview-modal-playhead" id="preview-modal-playhead"></div>
+          </div>
+          <div class="preview-modal-footer">
+            <span id="preview-modal-time">0.0s</span>
+            <button class="primary-button" id="preview-modal-stop" type="button">Stop preview</button>
+          </div>
+        </div>
+      </div>
     </main>
 
     <script type="module" src="/src/voiceLab.ts"></script>
