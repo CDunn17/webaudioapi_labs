@@ -58,11 +58,20 @@ const webAudioCheckbox = document.getElementById('engine-web-audio');
 const meydaCheckbox = document.getElementById('engine-meyda');
 const essentiaCheckbox = document.getElementById('engine-essentia');
 const basicPitchCheckbox = document.getElementById('engine-basic-pitch');
+const basicPitchOption = document.getElementById('engine-basic-pitch-option');
 const filterStartInput = document.getElementById('filter-start');
 const filterEndInput = document.getElementById('filter-end');
 const filterMinLevelInput = document.getElementById('filter-min-level');
 const filterMaxLevelInput = document.getElementById('filter-max-level');
 const resetFiltersButton = document.getElementById('reset-filters');
+const filterVisual = document.getElementById('filter-visual');
+const filterWaveform = document.getElementById('filter-waveform');
+const filterSelection = document.getElementById('filter-selection');
+const filterPlayhead = document.getElementById('filter-playhead');
+const filterStartHandle = document.getElementById('filter-start-handle');
+const filterEndHandle = document.getElementById('filter-end-handle');
+const filterMinHandle = document.getElementById('filter-min-handle');
+const filterMaxHandle = document.getElementById('filter-max-handle');
 
 if (
   appVersion === null ||
@@ -87,11 +96,20 @@ if (
   !(meydaCheckbox instanceof HTMLInputElement) ||
   !(essentiaCheckbox instanceof HTMLInputElement) ||
   !(basicPitchCheckbox instanceof HTMLInputElement) ||
+  !(basicPitchOption instanceof HTMLLabelElement) ||
   !(filterStartInput instanceof HTMLInputElement) ||
   !(filterEndInput instanceof HTMLInputElement) ||
   !(filterMinLevelInput instanceof HTMLInputElement) ||
   !(filterMaxLevelInput instanceof HTMLInputElement) ||
   !(resetFiltersButton instanceof HTMLButtonElement)
+  || !(filterVisual instanceof HTMLDivElement)
+  || !(filterWaveform instanceof HTMLCanvasElement)
+  || !(filterSelection instanceof HTMLDivElement)
+  || !(filterPlayhead instanceof HTMLDivElement)
+  || !(filterStartHandle instanceof HTMLButtonElement)
+  || !(filterEndHandle instanceof HTMLButtonElement)
+  || !(filterMinHandle instanceof HTMLButtonElement)
+  || !(filterMaxHandle instanceof HTMLButtonElement)
 ) {
   throw new Error('Voice Lab markup is missing required elements.');
 }
@@ -100,6 +118,7 @@ appVersion.textContent = `v${__APP_VERSION__}`;
 
 let selectedMode: CreationMode = 'effect';
 let decodedRecording: AudioBuffer | undefined;
+let decodedRecordingPeak = 1;
 let recordingUrl: string | undefined;
 let recorder: MediaRecorder | undefined;
 let recordingChunks: Blob[] = [];
@@ -114,6 +133,153 @@ let generatedResults: ProceduralResult[] = [];
 let activePreviewEngine: AnalysisEngineId | undefined;
 const preview = new ProceduralPreview();
 
+const filterHandles = {
+  end: filterEndHandle,
+  max: filterMaxHandle,
+  min: filterMinHandle,
+  start: filterStartHandle,
+};
+
+const filterNumber = (input: HTMLInputElement, fallback: number): number => {
+  const value = Number(input.value);
+  return Number.isFinite(value) ? value : fallback;
+};
+
+const recordingPeak = (recording: AudioBuffer): number => {
+  let peak = 0;
+  for (let channel = 0; channel < recording.numberOfChannels; channel += 1) {
+    const data = recording.getChannelData(channel);
+    for (let index = 0; index < data.length; index += 1) {
+      peak = Math.max(peak, Math.abs(data[index] ?? 0));
+    }
+  }
+  return Math.max(peak, Number.EPSILON);
+};
+
+const renderFilterVisual = (): void => {
+  const bounds = filterVisual.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(bounds.width));
+  const height = Math.max(1, Math.round(bounds.height));
+  filterWaveform.width = Math.round(width * ratio);
+  filterWaveform.height = Math.round(height * ratio);
+  const context = filterWaveform.getContext('2d');
+  if (context !== null) {
+    context.scale(ratio, ratio);
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = 'rgba(190, 216, 218, 0.1)';
+    context.beginPath();
+    for (let line = 1; line < 4; line += 1) {
+      const y = (height * line) / 4;
+      context.moveTo(0, y);
+      context.lineTo(width, y);
+    }
+    context.stroke();
+    if (decodedRecording !== undefined) {
+      const samplesPerPixel = decodedRecording.length / width;
+      context.fillStyle = 'rgba(174, 189, 208, 0.7)';
+      for (let x = 0; x < width; x += 1) {
+        const from = Math.floor(x * samplesPerPixel);
+        const to = Math.min(decodedRecording.length, Math.ceil((x + 1) * samplesPerPixel));
+        let peak = 0;
+        for (let channel = 0; channel < decodedRecording.numberOfChannels; channel += 1) {
+          const data = decodedRecording.getChannelData(channel);
+          for (let index = from; index < to; index += 1) peak = Math.max(peak, Math.abs(data[index] ?? 0));
+        }
+        const normalizedPeak = Math.min(1, peak / decodedRecordingPeak);
+        context.fillRect(x, height - normalizedPeak * height, 1, normalizedPeak * height);
+      }
+    }
+  }
+  const duration = decodedRecording?.duration ?? 0;
+  const start = duration > 0 ? Math.max(0, Math.min(1, filterNumber(filterStartInput, 0) / duration)) : 0;
+  const end = duration > 0 ? Math.max(start, Math.min(1, filterNumber(filterEndInput, duration) / duration)) : 1;
+  const min = Math.max(0, Math.min(100, filterNumber(filterMinLevelInput, 0)));
+  const max = Math.max(min, Math.min(100, filterNumber(filterMaxLevelInput, 100)));
+  filterStartHandle.style.left = `${start * 100}%`;
+  filterEndHandle.style.left = `${end * 100}%`;
+  filterMinHandle.style.top = `${100 - min}%`;
+  filterMaxHandle.style.top = `${100 - max}%`;
+  filterSelection.style.left = `${start * 100}%`;
+  filterSelection.style.width = `${(end - start) * 100}%`;
+  filterSelection.style.top = `${100 - max}%`;
+  filterSelection.style.height = `${max - min}%`;
+  filterStartHandle.setAttribute('aria-valuenow', filterStartInput.value);
+  filterEndHandle.setAttribute('aria-valuenow', filterEndInput.value);
+  filterMinHandle.setAttribute('aria-valuenow', filterMinLevelInput.value);
+  filterMaxHandle.setAttribute('aria-valuenow', filterMaxLevelInput.value);
+};
+
+type FilterHandleName = keyof typeof filterHandles;
+
+const setFilterFromPosition = (name: FilterHandleName, clientX: number, clientY: number): void => {
+  if (decodedRecording === undefined) return;
+  const bounds = filterVisual.getBoundingClientRect();
+  const horizontal = Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width));
+  const vertical = Math.max(0, Math.min(100, 100 - ((clientY - bounds.top) / bounds.height) * 100));
+  const start = filterNumber(filterStartInput, 0);
+  const end = filterNumber(filterEndInput, decodedRecording.duration);
+  const min = filterNumber(filterMinLevelInput, 0);
+  const max = filterNumber(filterMaxLevelInput, 100);
+  if (name === 'start') filterStartInput.value = Math.min(end, horizontal * decodedRecording.duration).toFixed(2);
+  if (name === 'end') filterEndInput.value = Math.max(start, horizontal * decodedRecording.duration).toFixed(2);
+  if (name === 'min') filterMinLevelInput.value = `${Math.round(Math.min(max, vertical))}`;
+  if (name === 'max') filterMaxLevelInput.value = `${Math.round(Math.max(min, vertical))}`;
+  renderFilterVisual();
+};
+
+const markFilterChanged = (): void => {
+  generatedResults = [];
+  preview.stop();
+  activePreviewEngine = undefined;
+  renderResults();
+  setResultStatus('Filter changed');
+  captureMessage.value = 'Generate configs to apply the analysis filter.';
+};
+
+for (const [name, handle] of Object.entries(filterHandles) as [FilterHandleName, HTMLButtonElement][]) {
+  const isTime = name === 'start' || name === 'end';
+  handle.setAttribute('role', 'slider');
+  handle.setAttribute('aria-valuemin', '0');
+  handle.setAttribute('aria-valuemax', isTime ? '0' : '100');
+  handle.addEventListener('pointerdown', (event) => {
+    handle.setPointerCapture(event.pointerId);
+    setFilterFromPosition(name, event.clientX, event.clientY);
+  });
+  handle.addEventListener('pointermove', (event) => {
+    if (handle.hasPointerCapture(event.pointerId)) setFilterFromPosition(name, event.clientX, event.clientY);
+  });
+  handle.addEventListener('pointerup', (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    handle.releasePointerCapture(event.pointerId);
+    markFilterChanged();
+  });
+  handle.addEventListener('keydown', (event) => {
+    const direction = event.key === 'ArrowRight' || event.key === 'ArrowUp'
+      ? 1
+      : event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 0;
+    if (direction === 0 || decodedRecording === undefined) return;
+    event.preventDefault();
+    const input = name === 'start' ? filterStartInput
+      : name === 'end' ? filterEndInput
+        : name === 'min' ? filterMinLevelInput : filterMaxLevelInput;
+    const step = isTime ? 0.1 : 1;
+    const next = filterNumber(input, 0) + direction * step;
+    const x = boundsForKeyboard(next, filterVisual);
+    setFilterFromPosition(name, x.clientX, x.clientY);
+    markFilterChanged();
+  });
+}
+
+function boundsForKeyboard(value: number, visual: HTMLDivElement): { clientX: number; clientY: number } {
+  const bounds = visual.getBoundingClientRect();
+  const duration = decodedRecording?.duration ?? 1;
+  return {
+    clientX: bounds.left + (value / duration) * bounds.width,
+    clientY: bounds.top + (1 - value / 100) * bounds.height,
+  };
+}
+
 const resetAnalysisFilters = (): void => {
   const duration = decodedRecording?.duration ?? 0;
   filterStartInput.value = '0';
@@ -122,6 +288,9 @@ const resetAnalysisFilters = (): void => {
   filterEndInput.max = duration.toFixed(2);
   filterMinLevelInput.value = '0';
   filterMaxLevelInput.value = '100';
+  filterStartHandle.setAttribute('aria-valuemax', duration.toFixed(2));
+  filterEndHandle.setAttribute('aria-valuemax', duration.toFixed(2));
+  renderFilterVisual();
 };
 
 const filteredRecording = (source: AudioBuffer): AudioBuffer => {
@@ -185,7 +354,12 @@ const renderMode = (): void => {
   captureTitle.textContent = details.title;
   captureGuidance.textContent = details.guidance;
   captureLimit.textContent = `${details.limitMs / 1000}s`;
-  basicPitchCheckbox.disabled = selectedMode !== 'melody';
+  const isMelody = selectedMode === 'melody';
+  basicPitchCheckbox.disabled = !isMelody;
+  basicPitchOption.hidden = !isMelody;
+  analyzeButton.textContent = selectedMode === 'effect'
+    ? 'Generate effect configs'
+    : selectedMode === 'beat' ? 'Generate beat configs' : 'Generate melody configs';
   for (const button of modeButtons) {
     const isSelected = button.dataset.mode === selectedMode;
     button.classList.toggle('is-active', isSelected);
@@ -459,6 +633,24 @@ const updatePreviewButtons = (): void => {
   document.querySelectorAll<HTMLButtonElement>('[data-preview-engine]').forEach((button) => {
     button.textContent = button.dataset.previewEngine === activePreviewEngine ? 'Stop preview' : 'Preview config';
   });
+  if (activePreviewEngine === undefined) {
+    filterPlayhead.classList.remove('is-playing');
+  }
+};
+
+const updateFilterPlayhead = (result: ProceduralResult, elapsedMs: number): void => {
+  const duration = decodedRecording?.duration ?? 0;
+  if (duration <= 0 || activePreviewEngine !== result.engine) return;
+  const selectedStartMs = filterNumber(filterStartInput, 0) * 1000;
+  const selectedEndMs = filterNumber(filterEndInput, duration) * 1000;
+  const sourceOffsetMs = Math.max(0, result.features.sourceStartMs);
+  const positionMs = Math.min(
+    selectedEndMs,
+    selectedStartMs + sourceOffsetMs + Math.max(0, elapsedMs)
+  );
+  const positionPercent = positionMs / (duration * 1000) * 100;
+  filterPlayhead.style.left = `${Math.max(0, Math.min(100, positionPercent))}%`;
+  filterPlayhead.classList.add('is-playing');
 };
 
 const renderResults = (): void => {
@@ -528,9 +720,14 @@ const renderResults = (): void => {
       recordingPlayback.pause();
       activePreviewEngine = result.engine;
       updatePreviewButtons();
-      void preview.play(result, () => {
+      void preview.play(result, (elapsedMs) => {
+        updateFilterPlayhead(result, elapsedMs);
+      }).catch((error: unknown) => {
+        preview.stop();
         activePreviewEngine = undefined;
         updatePreviewButtons();
+        const message = error instanceof Error ? error.message : String(error);
+        captureMessage.value = `${analysisEngineLabel(result.engine)} preview failed: ${message}`;
       });
     });
     const copyButton = document.createElement('button');
@@ -595,6 +792,7 @@ const decodeRecording = async (blob: Blob, sourceLabel: string): Promise<void> =
   const context = new AudioContext();
   try {
     decodedRecording = await context.decodeAudioData(await blob.arrayBuffer());
+    decodedRecordingPeak = recordingPeak(decodedRecording);
     resetAnalysisFilters();
     captureTime.textContent = `${decodedRecording.duration.toFixed(1)}s`;
     analyzeButton.disabled = false;
@@ -602,6 +800,7 @@ const decodeRecording = async (blob: Blob, sourceLabel: string): Promise<void> =
     captureMessage.value = 'Recording ready. Generate one or both procedural interpretations.';
   } catch {
     decodedRecording = undefined;
+    decodedRecordingPeak = 1;
     setCaptureStatus('Unsupported');
     captureMessage.value = 'This browser could not decode that audio format.';
   } finally {
@@ -733,7 +932,11 @@ const generateConfigs = async (): Promise<void> => {
       }
       generatedResults.push(result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown analysis error';
+      const message = error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error !== null && 'message' in error
+          ? String(error.message)
+          : String(error || 'Unknown analysis error');
       captureMessage.value = `${adapter.label} could not analyze this recording: ${message}`;
     }
   }
@@ -754,6 +957,7 @@ const clearRecording = (): void => {
   preview.stop();
   activePreviewEngine = undefined;
   decodedRecording = undefined;
+  decodedRecordingPeak = 1;
   resetAnalysisFilters();
   generatedResults = [];
   if (recordingUrl !== undefined) URL.revokeObjectURL(recordingUrl);
@@ -814,15 +1018,13 @@ resetFiltersButton.addEventListener('click', () => {
     : 'Analysis filter reset. Generate configs to apply it.';
 });
 for (const input of [filterStartInput, filterEndInput, filterMinLevelInput, filterMaxLevelInput]) {
+  input.addEventListener('input', renderFilterVisual);
   input.addEventListener('change', () => {
-    generatedResults = [];
-    preview.stop();
-    activePreviewEngine = undefined;
-    renderResults();
-    setResultStatus('Filter changed');
-    captureMessage.value = 'Generate configs to apply the analysis filter.';
+    renderFilterVisual();
+    markFilterChanged();
   });
 }
+new ResizeObserver(renderFilterVisual).observe(filterVisual);
 window.addEventListener('pagehide', () => {
   cleanCaptureResources();
   preview.close();
@@ -831,3 +1033,4 @@ window.addEventListener('pagehide', () => {
 
 renderMode();
 renderResults();
+renderFilterVisual();

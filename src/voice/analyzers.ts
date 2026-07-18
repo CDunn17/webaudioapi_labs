@@ -68,7 +68,12 @@ const aggregateFeatures = (
     14
   );
   const pitch = overrides.pitch ?? (
-    mode === 'beat' ? [] : detectPitchTrack(samples, buffer.sampleRate, FRAME_SIZE, FRAME_SIZE)
+    mode === 'beat' ? [] : detectPitchTrack(
+      samples,
+      buffer.sampleRate,
+      FRAME_SIZE,
+      mode === 'melody' ? 512 : FRAME_SIZE
+    )
   );
   const pitchValues = smoothValues(pitch.map((point) => point.frequency), 1);
   const pitchCurve = simplifyAutomationCurve(
@@ -141,6 +146,41 @@ const analyzeWithWebAudio = async (
 };
 
 let essentiaModulePromise: Promise<unknown> | undefined;
+const ESSENTIA_SAMPLE_RATE = 44_100;
+const ESSENTIA_PITCH_HOP = 512;
+
+const prepareEssentiaSignal = (
+  samples: Float32Array,
+  inputSampleRate: number
+): { originalLength: number; samples: Float32Array } => {
+  const outputLength = Math.max(1, Math.round(samples.length * ESSENTIA_SAMPLE_RATE / inputSampleRate));
+  const paddedLength = Math.max(
+    FRAME_SIZE,
+    Math.ceil((outputLength - FRAME_SIZE) / ESSENTIA_PITCH_HOP) * ESSENTIA_PITCH_HOP + FRAME_SIZE
+  );
+  const output = new Float32Array(paddedLength);
+  let peak = 0;
+  for (let index = 0; index < outputLength; index += 1) {
+    const sourcePosition = index * inputSampleRate / ESSENTIA_SAMPLE_RATE;
+    const firstIndex = Math.min(samples.length - 1, Math.floor(sourcePosition));
+    const secondIndex = Math.min(samples.length - 1, firstIndex + 1);
+    const blend = sourcePosition - firstIndex;
+    const first = samples[firstIndex] ?? 0;
+    const second = samples[secondIndex] ?? first;
+    const value = Number.isFinite(first) && Number.isFinite(second)
+      ? first + (second - first) * blend
+      : 0;
+    output[index] = value;
+    peak = Math.max(peak, Math.abs(value));
+  }
+  if (peak > 0) {
+    const gain = Math.min(16, 0.9 / peak);
+    for (let index = 0; index < outputLength; index += 1) {
+      output[index] = (output[index] ?? 0) * gain;
+    }
+  }
+  return { originalLength: outputLength, samples: output };
+};
 
 const analyzeWithEssentia = async (
   buffer: AudioBuffer,
@@ -159,10 +199,7 @@ const analyzeWithEssentia = async (
   const essentia = new Essentia(module);
   const trimmed = trimActiveRegion(monoSamples(buffer), buffer.sampleRate);
   const samples = trimmed.samples;
-  const signal = essentia.arrayToVector(samples);
-  const resampledResult = essentia.Resample(signal, buffer.sampleRate, 44_100, 1);
-  const resampled = essentia.vectorToArray(resampledResult.signal);
-  const resampledSignal = essentia.arrayToVector(resampled);
+  const localFeatureFrames = localFrames(samples, buffer.sampleRate);
   const vectorValues = (vector: unknown): Float32Array => {
     try {
       return essentia.vectorToArray(vector);
@@ -170,54 +207,131 @@ const analyzeWithEssentia = async (
       return new Float32Array();
     }
   };
-  const onsetResult = essentia.OnsetRate(resampledSignal);
-  const onsetTimesMs = [...vectorValues(onsetResult.onsets)].map((time) => time * 1000);
-  let pitch: PitchPoint[] = [];
-  if (mode !== 'beat') {
-    const pitchResult = essentia.PitchYinProbabilistic(
-      resampledSignal,
-      FRAME_SIZE,
-      256,
-      0.02,
-      'zero',
-      false,
-      44_100
+  const localOnsets = mode === 'beat'
+    ? detectBeatPeaks(localFeatureFrames, 85)
+    : detectOnsets(localFeatureFrames, mode === 'melody' ? 110 : 45);
+  const localPitch = mode === 'beat'
+    ? []
+    : detectPitchTrack(samples, buffer.sampleRate, FRAME_SIZE, mode === 'melody' ? 512 : FRAME_SIZE);
+  let onsetTimesMs = localOnsets;
+  let pitch = localPitch;
+  const hasAnalyzableSignal = samples.length > 0 && framePeak(samples) >= 0.00001;
+  if (hasAnalyzableSignal) {
+    const prepared = prepareEssentiaSignal(samples, buffer.sampleRate);
+    const resampledSignal = essentia.arrayToVector(
+      prepared.samples.slice(0, prepared.originalLength)
     );
-    const frequencies = vectorValues(pitchResult.pitch);
-    const probabilities = vectorValues(pitchResult.voicedProbabilities);
-    pitch = [...frequencies].map((frequency, index) => ({
-      confidence: probabilities[index] ?? 0,
-      frequency,
-      timeMs: (index * 256 / 44_100) * 1000,
-    })).filter((point) => point.frequency > 0 && point.confidence >= 0.35);
+    try {
+      const onsetResult = essentia.OnsetRate(resampledSignal);
+      const detectedOnsets = [...vectorValues(onsetResult.onsets)]
+        .filter((time) => Number.isFinite(time) && time >= 0)
+        .map((time) => time * 1000);
+      if (detectedOnsets.length > 0) onsetTimesMs = detectedOnsets;
+    } catch {
+      // Local onsets remain available when the native onset detector rejects a clip.
+    } finally {
+      resampledSignal.delete();
+    }
+    if (mode !== 'beat') {
+      const detectedPitch: PitchPoint[] = [];
+      for (
+        let start = 0;
+        start < prepared.originalLength;
+        start += ESSENTIA_PITCH_HOP
+      ) {
+        const frame = prepared.samples.slice(start, start + FRAME_SIZE);
+        const frameVector = essentia.arrayToVector(frame);
+        try {
+          const result = essentia.PitchYin(
+            frameVector,
+            FRAME_SIZE,
+            true,
+            1_600,
+            55,
+            ESSENTIA_SAMPLE_RATE,
+            0.2
+          );
+          if (
+            Number.isFinite(result.pitch) && result.pitch >= 55 && result.pitch <= 1_600
+            && Number.isFinite(result.pitchConfidence) && result.pitchConfidence >= 0.35
+          ) {
+            detectedPitch.push({
+              confidence: result.pitchConfidence,
+              frequency: result.pitch,
+              timeMs: start / ESSENTIA_SAMPLE_RATE * 1000,
+            });
+          }
+        } catch {
+          // A rejected frame does not prevent analysis of the remaining recording.
+        } finally {
+          frameVector.delete();
+        }
+      }
+      if (detectedPitch.length > 0) pitch = detectedPitch;
+    }
   }
-  essentia.delete();
+  try {
+    essentia.delete();
+  } catch {
+    // A native algorithm failure can also make cleanup unavailable.
+  }
   return aggregateFeatures(
     buffer,
     'essentia',
     samples,
     trimmed.startMs,
     trimmed.endMs,
-    localFrames(samples, buffer.sampleRate),
+    localFeatureFrames,
     mode,
     { onsetTimesMs, pitch }
   );
 };
 
-let basicPitchModelUrlPromise: Promise<string> | undefined;
+const BASIC_PITCH_SAMPLE_RATE = 22_050;
 
-const basicPitchUrl = async (): Promise<string> => {
-  basicPitchModelUrlPromise ??= Promise.all([
+const resampleForBasicPitch = async (buffer: AudioBuffer): Promise<AudioBuffer> => {
+  if (buffer.sampleRate === BASIC_PITCH_SAMPLE_RATE && buffer.numberOfChannels === 1) return buffer;
+  const frameCount = Math.max(1, Math.round(buffer.duration * BASIC_PITCH_SAMPLE_RATE));
+  const context = new OfflineAudioContext(
+    1,
+    frameCount,
+    BASIC_PITCH_SAMPLE_RATE
+  );
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(context.destination);
+  source.start();
+  return context.startRendering();
+};
+
+const loadBasicPitchModel = async () => {
+  const [tf, modelModule, weightsModule] = await Promise.all([
+    import('@tensorflow/tfjs'),
     import('@spotify/basic-pitch/model/model.json'),
     import('@spotify/basic-pitch/model/group1-shard1of1.bin?url'),
-  ]).then(([modelModule, weightsModule]) => {
-    const definition = structuredClone(modelModule.default);
-    definition.weightsManifest[0]!.paths = [weightsModule.default];
-    return URL.createObjectURL(new Blob([JSON.stringify(definition)], {
-      type: 'application/json',
-    }));
+  ]);
+  const weightsUrl = new URL(weightsModule.default, document.baseURI).href;
+  const response = await fetch(weightsUrl);
+  if (!response.ok) {
+    throw new Error(`Could not load Basic Pitch model weights (${response.status}).`);
+  }
+  const files = [
+    new File([JSON.stringify(modelModule.default)], 'model.json', { type: 'application/json' }),
+    new File([await response.blob()], 'group1-shard1of1.bin', {
+      type: 'application/octet-stream',
+    }),
+  ];
+  return tf.loadGraphModel(tf.io.browserFiles(files));
+};
+
+let basicPitchModelPromise: ReturnType<typeof loadBasicPitchModel> | undefined;
+
+const basicPitchModel = (): ReturnType<typeof loadBasicPitchModel> => {
+  basicPitchModelPromise ??= loadBasicPitchModel().catch((error: unknown) => {
+    basicPitchModelPromise = undefined;
+    throw error;
   });
-  return basicPitchModelUrlPromise;
+  return basicPitchModelPromise;
 };
 
 const analyzeWithBasicPitch = async (
@@ -235,8 +349,9 @@ const analyzeWithBasicPitch = async (
   const frames: number[][] = [];
   const onsets: number[][] = [];
   const contours: number[][] = [];
-  const basicPitch = new BasicPitch(await basicPitchUrl());
-  await basicPitch.evaluateModel(buffer, (frameValues, onsetValues, contourValues) => {
+  const basicPitch = new BasicPitch(basicPitchModel());
+  const modelInput = await resampleForBasicPitch(buffer);
+  await basicPitch.evaluateModel(modelInput, (frameValues, onsetValues, contourValues) => {
     frames.push(...frameValues);
     onsets.push(...onsetValues);
     contours.push(...contourValues);

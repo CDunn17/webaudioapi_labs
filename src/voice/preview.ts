@@ -11,41 +11,57 @@ const midiToFrequency = (midi: number): number => 440 * 2 ** ((midi - 69) / 12);
 export class ProceduralPreview {
   private audioContext: AudioContext | undefined;
   private completionTimer: number | undefined;
+  private loopGeneration = 0;
   private master: GainNode | undefined;
+  private progressFrame: number | undefined;
   private sources: AudioScheduledSourceNode[] = [];
 
-  async play(result: ProceduralResult, onComplete: () => void): Promise<void> {
+  async play(result: ProceduralResult, onProgress: (elapsedMs: number) => void): Promise<void> {
     this.stop();
     const context = this.context();
+    const generation = this.loopGeneration;
     if (context.state === 'suspended') await context.resume();
-    const startAt = context.currentTime + 0.06;
-    this.master = context.createGain();
-    this.master.gain.value = 0.8;
-    this.master.connect(context.destination);
+    if (generation !== this.loopGeneration) return;
+    const startCycle = (): void => {
+      if (generation !== this.loopGeneration) return;
+      const startAt = context.currentTime + 0.06;
+      this.master = context.createGain();
+      this.master.gain.value = 0.8;
+      this.master.connect(context.destination);
 
-    let durationMs: number;
-    if (result.mode === 'effect') {
-      if (this.master === undefined) return;
-      const rendered = renderEffectLayers(
-        context,
-        this.master,
-        result.config.layers,
-        startAt
-      );
-      this.sources.push(...rendered.sources);
-      durationMs = rendered.durationMs;
-    } else if (result.mode === 'beat') {
-      durationMs = this.playBeat(result.config, startAt);
-    } else {
-      durationMs = this.playMelody(result.config, startAt);
-    }
-    this.completionTimer = window.setTimeout(() => {
-      this.clear(false);
-      onComplete();
-    }, durationMs + 180);
+      let durationMs: number;
+      if (result.mode === 'effect') {
+        if (this.master === undefined) return;
+        const rendered = renderEffectLayers(
+          context,
+          this.master,
+          result.config.layers,
+          startAt
+        );
+        this.sources.push(...rendered.sources);
+        durationMs = rendered.durationMs;
+      } else if (result.mode === 'beat') {
+        durationMs = this.playBeat(result.config, startAt);
+      } else {
+        durationMs = this.playMelody(result.config, startAt);
+      }
+      const updateProgress = (): void => {
+        if (generation !== this.loopGeneration) return;
+        onProgress(Math.max(0, (context.currentTime - startAt) * 1000));
+        this.progressFrame = window.requestAnimationFrame(updateProgress);
+      };
+      updateProgress();
+      const safeDurationMs = Number.isFinite(durationMs) ? Math.max(120, durationMs) : 1_000;
+      this.completionTimer = window.setTimeout(() => {
+        this.clear(false);
+        if (generation === this.loopGeneration) startCycle();
+      }, safeDurationMs + 100);
+    };
+    startCycle();
   }
 
   stop(): void {
+    this.loopGeneration += 1;
     this.clear(true);
   }
 
@@ -67,7 +83,9 @@ export class ProceduralPreview {
 
   private clear(stopSources: boolean): void {
     if (this.completionTimer !== undefined) window.clearTimeout(this.completionTimer);
+    if (this.progressFrame !== undefined) window.cancelAnimationFrame(this.progressFrame);
     this.completionTimer = undefined;
+    this.progressFrame = undefined;
     if (stopSources) {
       for (const source of this.sources) {
         try {
@@ -133,15 +151,22 @@ export class ProceduralPreview {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       const filter = context.createBiquadFilter();
-      const noteStart = startAt + note.startMs / 1000;
-      const noteEnd = noteStart + note.durationMs / 1000;
+      const startMs = Number.isFinite(note.startMs) ? Math.max(0, note.startMs) : 0;
+      const noteDurationMs = Number.isFinite(note.durationMs)
+        ? Math.max(20, note.durationMs)
+        : 100;
+      const velocity = Number.isFinite(note.velocity)
+        ? Math.max(0.05, Math.min(1, note.velocity))
+        : 0.7;
+      const noteStart = Math.max(context.currentTime, startAt + startMs / 1000);
+      const noteEnd = noteStart + noteDurationMs / 1000;
       oscillator.type = config.oscillatorType;
       oscillator.frequency.value = midiToFrequency(note.midi);
       filter.type = 'lowpass';
       filter.frequency.value = config.filterFrequency;
       gain.gain.setValueAtTime(0, noteStart);
-      gain.gain.linearRampToValueAtTime(0.45 * note.velocity, noteStart + 0.012);
-      gain.gain.setValueAtTime(0.45 * note.velocity, Math.max(noteStart + 0.012, noteEnd - 0.06));
+      gain.gain.linearRampToValueAtTime(0.45 * velocity, noteStart + 0.012);
+      gain.gain.setValueAtTime(0.45 * velocity, Math.max(noteStart + 0.012, noteEnd - 0.06));
       gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
       oscillator.connect(filter);
       filter.connect(gain);
@@ -149,7 +174,7 @@ export class ProceduralPreview {
       oscillator.start(noteStart);
       oscillator.stop(noteEnd + 0.03);
       this.sources.push(oscillator);
-      durationMs = Math.max(durationMs, note.startMs + note.durationMs);
+      durationMs = Math.max(durationMs, startMs + noteDurationMs);
     }
     return Math.max(300, durationMs);
   }

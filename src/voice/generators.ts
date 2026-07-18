@@ -457,7 +457,20 @@ const beatConfig = (features: AudioFeatures): BeatConfig => {
 const frequencyToMidi = (frequency: number): number => 69 + 12 * Math.log2(frequency / 440);
 
 const melodyNotes = (features: AudioFeatures): MelodyNote[] => {
-  if (features.transcribedNotes !== undefined) return features.transcribedNotes.slice(0, 64);
+  if (features.transcribedNotes !== undefined) {
+    const notes = features.transcribedNotes
+      .filter((note) => Number.isFinite(note.startMs) && Number.isFinite(note.durationMs))
+      .sort((first, second) => first.startMs - second.startMs)
+      .slice(0, 64);
+    const origin = notes[0]?.startMs ?? 0;
+    return notes.map((note) => ({
+      ...note,
+      durationMs: rounded(note.durationMs, 20, 10_000),
+      midi: rounded(note.midi, 0, 127),
+      startMs: Math.max(0, Math.round(note.startMs - origin)),
+      velocity: clamp(Number.isFinite(note.velocity) ? note.velocity : 0.7, 0.05, 1),
+    }));
+  }
   const notes: MelodyNote[] = [];
   let group: typeof features.pitch = [];
   const flush = (): void => {
@@ -473,7 +486,7 @@ const melodyNotes = (features: AudioFeatures): MelodyNote[] => {
     group = [];
   };
 
-  for (const point of features.pitch) {
+  for (const point of [...features.pitch].sort((first, second) => first.timeMs - second.timeMs)) {
     const previous = group[group.length - 1];
     const groupMidi = group.length > 0
       ? median(group.map((item) => frequencyToMidi(item.frequency)))

@@ -329,7 +329,7 @@ const autocorrelationPitch = (
   frame: Float32Array,
   sampleRate: number
 ): { confidence: number; frequency: number } | undefined => {
-  if (frameRms(frame) < 0.012) return undefined;
+  if (frameRms(frame) < 0.004) return undefined;
   const minimumLag = Math.floor(sampleRate / 720);
   const maximumLag = Math.min(Math.floor(sampleRate / 70), frame.length - 4);
   let bestLag = 0;

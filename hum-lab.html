@@ -101,15 +101,26 @@
               <input id="engine-essentia" type="checkbox" value="essentia" checked />
               <span><strong>Essentia.js</strong><small>WASM onset, rhythm, and probabilistic pitch analysis</small></span>
             </label>
-            <label>
+            <label id="engine-basic-pitch-option">
               <input id="engine-basic-pitch" type="checkbox" value="basicPitch" checked />
-              <span><strong>Spotify Basic Pitch</strong><small>Neural note transcription; melody mode only</small></span>
+              <span><strong>Spotify Basic Pitch</strong><small>Neural note transcription for melody</small></span>
             </label>
           </fieldset>
 
           <fieldset class="recording-filters">
             <legend>Analysis filter</legend>
-            <p>Keep only this time span and level range before either engine analyzes it.</p>
+            <p>The graph fits each recording's full duration and peak level. Drag its edges to keep only the time span and level range you want analyzed.</p>
+            <div class="recording-filter-visual" id="filter-visual" aria-label="Visual analysis filter">
+              <canvas id="filter-waveform"></canvas>
+              <div class="filter-selection" id="filter-selection"></div>
+              <div class="filter-playhead" id="filter-playhead" aria-hidden="true"></div>
+              <button class="filter-handle filter-handle-time filter-handle-start" id="filter-start-handle" type="button" aria-label="Analysis start time"></button>
+              <button class="filter-handle filter-handle-time filter-handle-end" id="filter-end-handle" type="button" aria-label="Analysis end time"></button>
+              <button class="filter-handle filter-handle-level filter-handle-min" id="filter-min-handle" type="button" aria-label="Minimum analysis level"></button>
+              <button class="filter-handle filter-handle-level filter-handle-max" id="filter-max-handle" type="button" aria-label="Maximum analysis level"></button>
+              <span class="filter-axis-label filter-axis-time">Time</span>
+              <span class="filter-axis-label filter-axis-level">Level</span>
+            </div>
             <div class="recording-filter-grid">
               <label>
                 <span>Start (seconds)</span>
