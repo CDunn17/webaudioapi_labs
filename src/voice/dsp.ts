@@ -216,10 +216,13 @@ export const spectralFeatures = (
   let total = 0;
   let logTotal = 0;
   for (let index = 0; index < magnitudes.length; index += 1) {
-    const magnitude = Math.max(1e-12, magnitudes[index] ?? 0);
+    const magnitude = Math.max(0, magnitudes[index] ?? 0);
     weighted += index * magnitude;
     total += magnitude;
-    logTotal += Math.log(magnitude);
+    logTotal += Math.log(Math.max(1e-12, magnitude));
+  }
+  if (total <= 1e-9) {
+    return { centroidHz: 0, flatness: 0, rolloffHz: 0 };
   }
   const centroidBin = total > 0 ? weighted / total : 0;
   const arithmeticMean = total / Math.max(1, magnitudes.length);
@@ -281,13 +284,16 @@ export const detectOnsets = (frames: FrameFeatures[], minimumGapMs: number): num
 // detection; the beat generator only needs event timing and relative timbre.
 export const detectBeatPeaks = (frames: FrameFeatures[], minimumGapMs: number): number[] => {
   if (frames.length < 3) return [];
-  const levels = smoothValues(frames.map((frame) => frame.rms), 1);
+  // Each RMS frame is already a windowed average. Smoothing it again widened
+  // vocal hits and raised the valleys between them.
+  const levels = frames.map((frame) => frame.rms);
   const maximum = Math.max(0, ...levels);
-  const floor = median(levels);
-  const threshold = Math.max(0.006, floor * 1.25, maximum * 0.07);
+  const sortedLevels = [...levels].sort((first, second) => first - second);
+  const floor = sortedLevels[Math.floor((sortedLevels.length - 1) * 0.15)] ?? 0;
+  const threshold = Math.max(1e-6, floor * 1.8, maximum * 0.025);
   const candidates: Array<{ level: number; timeMs: number }> = [];
 
-  const attacks = detectOnsets(frames, Math.max(55, minimumGapMs * 0.7));
+  const attacks = detectOnsets(frames, Math.max(35, minimumGapMs * 0.7));
   for (const attack of attacks) {
     const region = frames
       .map((frame, index) => ({ index, timeMs: frame.timeMs }))
@@ -327,15 +333,35 @@ export const detectBeatPeaks = (frames: FrameFeatures[], minimumGapMs: number): 
 
 const autocorrelationPitch = (
   frame: Float32Array,
-  sampleRate: number
+  sampleRate: number,
+  maximumFrequency: number
 ): { confidence: number; frequency: number } | undefined => {
-  if (frameRms(frame) < 0.004) return undefined;
-  const minimumLag = Math.floor(sampleRate / 720);
+  const rms = frameRms(frame);
+  if (rms < 0.004) return undefined;
+  const midpoint = Math.floor(frame.length / 2);
+  const firstHalfRms = frameRms(frame.slice(0, midpoint));
+  const secondHalfRms = frameRms(frame.slice(midpoint));
+  const edgeSize = Math.max(32, Math.floor(frame.length / 8));
+  const leadingEdgeRms = frameRms(frame.slice(0, edgeSize));
+  const trailingEdgeRms = frameRms(frame.slice(-edgeSize));
+  // A frame containing only an onset/tail fragment may fit several cycles of
+  // an upper harmonic but not one full fundamental period. Leave that boundary
+  // unpitched instead of creating a short octave note.
+  if (
+    Math.min(firstHalfRms, secondHalfRms) < rms * 0.3 ||
+    Math.min(leadingEdgeRms, trailingEdgeRms) < rms * 0.5
+  ) return undefined;
+  const minimumLag = Math.max(2, Math.floor(sampleRate / maximumFrequency));
+  // The shortest admissible period can sit between minimumLag and the next
+  // sample. Measure one supporting lag below the candidate range so that peak
+  // can still be interpolated without admitting an above-limit candidate.
+  const correlationMinimumLag = Math.max(1, minimumLag - 1);
   const maximumLag = Math.min(Math.floor(sampleRate / 70), frame.length - 4);
   let bestLag = 0;
   let bestCorrelation = 0;
+  const correlations = new Float64Array(maximumLag + 1);
 
-  for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
+  for (let lag = correlationMinimumLag; lag <= maximumLag; lag += 1) {
     let cross = 0;
     let firstEnergy = 0;
     let secondEnergy = 0;
@@ -348,29 +374,126 @@ const autocorrelationPitch = (
     }
     const denominator = Math.sqrt(firstEnergy * secondEnergy);
     const correlation = denominator > 0 ? cross / denominator : 0;
-    if (correlation > bestCorrelation) {
+    correlations[lag] = correlation;
+    if (lag >= minimumLag && correlation > bestCorrelation) {
       bestCorrelation = correlation;
       bestLag = lag;
     }
   }
   if (bestLag === 0 || bestCorrelation < 0.58) return undefined;
-  return { confidence: bestCorrelation, frequency: sampleRate / bestLag };
+  type CorrelationPeak = { lag: number; value: number };
+  const interpolatedPeak = (lag: number): CorrelationPeak => {
+    const center = Math.round(clamp(lag, minimumLag, maximumLag));
+    const current = correlations[center] ?? 0;
+    if (center <= correlationMinimumLag || center >= maximumLag) {
+      return { lag: center, value: clamp(current, 0, 1) };
+    }
+    const previous = correlations[center - 1] ?? current;
+    const next = correlations[center + 1] ?? current;
+    const curvature = previous - 2 * current + next;
+    if (curvature >= -1e-9) {
+      return { lag: center, value: clamp(current, 0, 1) };
+    }
+    // A clean tone's autocorrelation peak is cosine-shaped. A parabola
+    // underestimates very short (4--7 sample) periods enough to make a later
+    // integer-aligned multiple look materially stronger. Fit that cosine when
+    // its local samples support one, retaining the parabola for other shapes.
+    const cosine = current > 1e-9
+      ? clamp((previous + next) / (2 * current), -1, 1)
+      : 1;
+    const angularFrequency = Math.acos(cosine);
+    const angularSine = Math.sin(angularFrequency);
+    if (angularFrequency > 1e-6 && angularSine > 1e-6) {
+      const cosineOffset = clamp(
+        Math.atan2(next - previous, 2 * current * angularSine) / angularFrequency,
+        -1,
+        1
+      );
+      const cosineScale = Math.cos(angularFrequency * cosineOffset);
+      const cosineValue = current / cosineScale;
+      if (cosineScale > 1e-6 && Number.isFinite(cosineValue)) {
+        return {
+          lag: clamp(center + cosineOffset, minimumLag, maximumLag),
+          value: clamp(cosineValue, 0, 1),
+        };
+      }
+    }
+    const offset = clamp(0.5 * (previous - next) / curvature, -1, 1);
+    return {
+      lag: clamp(center + offset, minimumLag, maximumLag),
+      value: clamp(current - 0.25 * (previous - next) * offset, 0, 1),
+    };
+  };
+  const strongestPeakNear = (center: number): CorrelationPeak => {
+    let strongest: CorrelationPeak | undefined;
+    for (
+      let lag = Math.max(minimumLag, Math.floor(center) - 3);
+      lag <= Math.min(maximumLag, Math.ceil(center) + 3);
+      lag += 1
+    ) {
+      const correlation = correlations[lag] ?? 0;
+      if (
+        correlation < (correlations[Math.max(correlationMinimumLag, lag - 1)] ?? 0) ||
+        correlation < (correlations[Math.min(maximumLag, lag + 1)] ?? 0)
+      ) continue;
+      const peak = interpolatedPeak(lag);
+      if (strongest === undefined || peak.value > strongest.value) strongest = peak;
+    }
+    return strongest ?? interpolatedPeak(center);
+  };
+  // Multiples of the true period can have a marginally higher correlation and
+  // previously pulled clean tones down by one or more octaves. Prefer the
+  // earliest strong local peak near the global maximum.
+  // A true period and its integer multiples are nearly tied for a clean tone.
+  // A dominant upper harmonic can also create an early peak, but the matching
+  // full-period multiple is materially stronger. Validate that relationship
+  // explicitly instead of relying on one fixed near-maximum threshold. Compare
+  // interpolated peak heights so short high-frequency periods are not penalized
+  // merely because their first integer lag falls between samples.
+  let selectedPeak = interpolatedPeak(bestLag);
+  const nearMaximum = Math.max(0.58, selectedPeak.value * 0.9);
+  for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
+    const correlation = correlations[lag] ?? 0;
+    if (
+      correlation < (correlations[Math.max(correlationMinimumLag, lag - 1)] ?? 0) ||
+      correlation < (correlations[Math.min(maximumLag, lag + 1)] ?? 0)
+    ) continue;
+    const peak = interpolatedPeak(lag);
+    const materiallyStrongerMultiple = [2, 3, 4].some((multiple) => {
+      const center = peak.lag * multiple;
+      if (center > maximumLag) return false;
+      return strongestPeakNear(center).value >= peak.value + 0.012;
+    });
+    if (
+      peak.value >= nearMaximum &&
+      !materiallyStrongerMultiple
+    ) {
+      selectedPeak = peak;
+      break;
+    }
+  }
+  return { confidence: selectedPeak.value, frequency: sampleRate / selectedPeak.lag };
 };
 
 export const detectPitchTrack = (
   samples: Float32Array,
   sampleRate: number,
   frameSize = 2048,
-  hopSize = 2048
+  hopSize = 2048,
+  maximumFrequency = 720
 ): PitchPoint[] => {
   const points: PitchPoint[] = [];
   for (let start = 0; start + frameSize <= samples.length; start += hopSize) {
-    const detected = autocorrelationPitch(samples.slice(start, start + frameSize), sampleRate);
+    const detected = autocorrelationPitch(
+      samples.slice(start, start + frameSize),
+      sampleRate,
+      maximumFrequency
+    );
     if (detected === undefined) continue;
     points.push({
       confidence: detected.confidence,
       frequency: detected.frequency,
-      timeMs: (start / sampleRate) * 1000,
+      timeMs: ((start + frameSize / 2) / sampleRate) * 1000,
     });
   }
   return points;

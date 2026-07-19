@@ -8,12 +8,9 @@ import { renderEffectLayers } from './effectRenderer';
 import type { AnalysisAdapter, AudioFeatures } from './types';
 
 type FitParameters = {
-  durationScale: number;
   eventGain: number;
   filterScale: number;
   resonanceGain: number;
-  spreadScale: number;
-  tailScale: number;
   textureGain: number;
   toneGain: number;
 };
@@ -28,12 +25,9 @@ export type EffectFitResult = {
 type ProgressHandler = (completed: number, total: number) => void;
 
 const INITIAL_PARAMETERS: FitParameters = {
-  durationScale: 1,
   eventGain: 1,
   filterScale: 1,
   resonanceGain: 1,
-  spreadScale: 1,
-  tailScale: 1,
   textureGain: 1,
   toneGain: 1,
 };
@@ -49,14 +43,14 @@ const layerDurationMs = (layer: SoundLayerConfig): number => {
 };
 
 const renderConfig = async (config: LayeredSoundConfig): Promise<AudioBuffer> => {
-  const sampleRate = 22_050;
+  const sampleRate = 44_100;
   const durationMs = Math.max(160, ...config.layers.map(layerDurationMs));
   const frameCount = Math.ceil(sampleRate * (durationMs / 1000 + 0.12));
   const context = new OfflineAudioContext(1, frameCount, sampleRate);
   const master = context.createGain();
   master.gain.value = 0.8;
   master.connect(context.destination);
-  renderEffectLayers(context, master, config.layers, 0.01);
+  renderEffectLayers(context, master, config.layers, 0);
   return context.startRendering();
 };
 
@@ -75,23 +69,9 @@ const scaledConfig = (
 ): LayeredSoundConfig => {
   const config = cloneConfig(base);
   for (const layer of config.layers) {
-    layer.sound.durationMs = Math.round(
-      clamp(layer.sound.durationMs * parameters.durationScale, 20, 4_000)
-    );
-    if (layer.automation !== undefined) {
-      for (const key of ['filterFrequency', 'frequency', 'gain'] as const) {
-        const curve = layer.automation[key];
-        if (curve !== undefined) {
-          layer.automation[key] = curve.map((point) => ({
-            ...point,
-            timeMs: Math.round(point.timeMs * parameters.durationScale),
-          }));
-        }
-      }
-    }
     layer.sound.volume = clamp(
       layer.sound.volume * volumeScaleFor(layer, parameters),
-      0.005,
+      0,
       0.48
     );
     if ('filterFrequency' in layer.sound && layer.sound.filterFrequency !== undefined) {
@@ -109,12 +89,8 @@ const scaledConfig = (
       const frequencyScale = Math.sqrt(parameters.filterScale);
       layer.sound.resonances = layer.sound.resonances.map((resonance) => ({
         ...resonance,
-        decayMs: Math.round(clamp(resonance.decayMs * parameters.tailScale, 20, 4_000)),
         frequency: Math.round(clamp(resonance.frequency * frequencyScale, 60, 16_000)),
       }));
-      layer.sound.releaseMs = Math.round(
-        clamp(layer.sound.releaseMs * parameters.tailScale, 10, layer.sound.durationMs)
-      );
     }
     if (layer.kind === 'impulseCluster') {
       const frequencyScale = Math.sqrt(parameters.filterScale);
@@ -123,16 +99,6 @@ const scaledConfig = (
       );
       layer.sound.maxFrequency = Math.round(
         clamp(layer.sound.maxFrequency * frequencyScale, layer.sound.minFrequency, 18_000)
-      );
-      layer.sound.decayMs = Math.round(
-        clamp(layer.sound.decayMs * parameters.tailScale, 8, 1_500)
-      );
-      layer.sound.spreadMs = Math.round(
-        clamp(layer.sound.spreadMs * parameters.spreadScale, 0, 3_000)
-      );
-    } else if (layer.kind !== 'resonatorBank' && 'releaseMs' in layer.sound) {
-      layer.sound.releaseMs = Math.round(
-        clamp(layer.sound.releaseMs * parameters.tailScale, 0, layer.sound.durationMs)
       );
     }
   }
@@ -147,8 +113,8 @@ const curveValueAt = (
   if (curve.length === 0) return 0;
   const timeMs = progress * durationMs;
   const nextIndex = curve.findIndex((point) => point.timeMs >= timeMs);
-  if (nextIndex <= 0) return curve[0]?.value ?? 0;
   if (nextIndex < 0) return curve[curve.length - 1]?.value ?? 0;
+  if (nextIndex === 0) return curve[0]?.value ?? 0;
   const previous = curve[nextIndex - 1];
   const next = curve[nextIndex];
   if (previous === undefined || next === undefined) return next?.value ?? previous?.value ?? 0;
@@ -178,6 +144,54 @@ const curveLoss = (
   return mean(errors);
 };
 
+type AmplitudeLoss = {
+  overfill: number;
+  shape: number;
+  silenceOverfill: number;
+};
+
+const amplitudeLoss = (
+  target: AutomationPoint[],
+  candidate: AutomationPoint[],
+  targetDurationMs: number,
+  candidateDurationMs: number
+): AmplitudeLoss => {
+  const comparisonDurationMs = Math.max(1, targetDurationMs, candidateDurationMs);
+  const sampleCount = Math.max(
+    96,
+    Math.min(256, Math.ceil(comparisonDurationMs / 20) + 1)
+  );
+  const shapeErrors: number[] = [];
+  const overfillErrors: number[] = [];
+  const silenceOverfillErrors: number[] = [];
+  const silenceThreshold = 0.04;
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const timeMs = (index / (sampleCount - 1)) * comparisonDurationMs;
+    const targetValue = timeMs <= targetDurationMs
+      ? curveValueAt(target, timeMs / Math.max(1, targetDurationMs), targetDurationMs)
+      : 0;
+    const candidateValue = timeMs <= candidateDurationMs
+      ? curveValueAt(candidate, timeMs / Math.max(1, candidateDurationMs), candidateDurationMs)
+      : 0;
+    const overfill = Math.max(0, candidateValue - targetValue);
+    const silenceWeight = clamp(
+      (silenceThreshold - targetValue) / silenceThreshold,
+      0,
+      1
+    );
+    shapeErrors.push(Math.abs(targetValue - candidateValue));
+    overfillErrors.push(overfill);
+    silenceOverfillErrors.push(candidateValue * silenceWeight);
+  }
+
+  return {
+    overfill: mean(overfillErrors),
+    shape: mean(shapeErrors),
+    silenceOverfill: mean(silenceOverfillErrors),
+  };
+};
+
 const normalizedOnsets = (features: AudioFeatures): number[] =>
   features.onsetTimesMs.map((time) => time / Math.max(1, features.durationMs));
 
@@ -194,7 +208,7 @@ const onsetLoss = (target: AudioFeatures, candidate: AudioFeatures): number => {
 };
 
 const featureLoss = (target: AudioFeatures, candidate: AudioFeatures): number => {
-  const amplitude = curveLoss(
+  const amplitude = amplitudeLoss(
     target.amplitudeCurve,
     candidate.amplitudeCurve,
     target.durationMs,
@@ -224,13 +238,15 @@ const featureLoss = (target: AudioFeatures, candidate: AudioFeatures): number =>
         )
       : 0;
   return (
-    amplitude * 2.8 +
-    brightness * 1.25 +
-    rms * 0.7 +
-    texture * 1.1 +
-    duration * 0.9 +
-    onsetLoss(target, candidate) * 1.4 +
-    pitch * 0.45
+    amplitude.shape * 3.6 +
+    amplitude.overfill * 5.5 +
+    amplitude.silenceOverfill * 12 +
+    brightness * 0.9 +
+    rms * 0.5 +
+    texture * 0.7 +
+    duration * 0.65 +
+    onsetLoss(target, candidate) * 0.9 +
+    pitch * 0.3
   );
 };
 
@@ -253,9 +269,6 @@ export const fitEffectConfig = async (
   onProgress?: ProgressHandler
 ): Promise<EffectFitResult> => {
   const dimensions: (keyof FitParameters)[] = [
-    'durationScale',
-    'tailScale',
-    'spreadScale',
     'textureGain',
     'toneGain',
     'eventGain',
@@ -263,10 +276,22 @@ export const fitEffectConfig = async (
     'filterScale',
   ];
   const passes = [
-    { down: 0.72, up: 1.34 },
-    { down: 0.86, up: 1.16 },
+    { down: 0.35, up: 1.34 },
+    { down: 0.72, up: 1.16 },
   ];
-  const total = 1 + dimensions.length * 2 * passes.length;
+  const gainDimensions = new Set<keyof FitParameters>([
+    'textureGain',
+    'toneGain',
+    'eventGain',
+    'resonanceGain',
+  ]);
+  const total = 1 + passes.reduce(
+    (count) => count + dimensions.reduce(
+      (passCount, dimension) => passCount + (gainDimensions.has(dimension) ? 4 : 2),
+      0
+    ),
+    0
+  );
   let candidateCount = 0;
   let parameters = { ...INITIAL_PARAMETERS };
   let best = await evaluate(base, parameters, target, adapter);
@@ -278,10 +303,22 @@ export const fitEffectConfig = async (
     for (const dimension of dimensions) {
       let dimensionBest = best;
       let dimensionParameters = parameters;
-      for (const factor of [pass.down, pass.up]) {
+      const currentValue = parameters[dimension];
+      const candidateValues = gainDimensions.has(dimension)
+        ? [
+            clamp(currentValue * pass.down, 0, 1.9),
+            clamp(currentValue * pass.up, 0, 1.9),
+            0,
+            1,
+          ]
+        : [
+            clamp(currentValue * pass.down, 0, 1.9),
+            clamp(currentValue * pass.up, 0, 1.9),
+          ];
+      for (const candidateValue of candidateValues) {
         const candidateParameters = {
           ...parameters,
-          [dimension]: clamp(parameters[dimension] * factor, 0.42, 1.9),
+          [dimension]: candidateValue,
         };
         const candidate = await evaluate(base, candidateParameters, target, adapter);
         candidateCount += 1;

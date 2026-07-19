@@ -21,7 +21,14 @@ export type PitchPoint = {
   timeMs: number;
 };
 
+export type ActivityRegion = {
+  endMs: number;
+  peak: number;
+  startMs: number;
+};
+
 export type AudioFeatures = {
+  activityRegions: ActivityRegion[];
   amplitudeCurve: AutomationPoint[];
   brightnessCurve: AutomationPoint[];
   centroidHz: number;
@@ -35,6 +42,7 @@ export type AudioFeatures = {
   pitchCurve: AutomationPoint[];
   rms: number;
   rolloffHz: number;
+  sampleRate: number;
   sourceEndMs: number;
   sourceStartMs: number;
   zcr: number;
@@ -50,7 +58,7 @@ export type BeatVoice = {
 };
 
 export type BeatLane = {
-  hits: Array<{ label: string; startMs: number; velocity: number }>;
+  hits: Array<{ durationMs?: number; label: string; startMs: number; velocity: number }>;
   label: string;
   steps: number[];
   voice: BeatVoice;
@@ -67,12 +75,16 @@ export type BeatConfig = {
 
 export type MelodyNote = {
   durationMs: number;
+  filterFrequency?: number;
+  gainCurve?: AutomationPoint[];
   midi: number;
+  pitchBendCurve?: AutomationPoint[];
   startMs: number;
   velocity: number;
 };
 
 export type MelodyConfig = {
+  durationMs: number;
   filterFrequency: number;
   masterVolume: number;
   notes: MelodyNote[];

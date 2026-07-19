@@ -14,17 +14,17 @@ The lab presets live in `src/config/audio.ts` and `src/config/music.ts`. These f
 
 ### Voice Lab generation
 
-Voice Lab trims leading and trailing silence before analysis, retains simplified amplitude, brightness, and pitch curves, and represents effect onsets as independently timed procedural layers. Effect generation can add resonator banks for inharmonic ringing and seeded impulse clusters for debris, shards, and secondary impacts. These timeline fields and primitives remain sample-free and deterministic.
+Voice Lab trims leading and trailing silence before analysis, then uses a separate short-hop envelope to retain internal rests, relative peaks, brightness, and pitch contour. Effect layers are hard-gated by measured active regions, and event layers keep their detected timing and local decay. Conservative resonator banks are used only when a strong, low-flatness impact supports ringing; generation no longer scatters inferred fragments between measured events. These timeline fields and primitives remain sample-free and deterministic.
 
-Beat generation combines attack detection with nearby amplitude peaks, groups short peak regions by relative timbre, and previews simple low/mid/high tones at the recorded relative times. The estimated tempo grid is retained as a visual guide rather than used to quantize playback.
+Beat generation combines attack detection with nearby amplitude peaks, groups short peak regions by relative timbre, and derives each lane's tone/noise balance and each hit's level and decay from the recording. Hits retain their positions on the complete trimmed timeline, including the lead-in, and their tails stop at measured valleys. The estimated tempo grid is retained as a visual guide rather than used to quantize playback; silence does not create a fallback hit.
 
 The Voice Lab analysis filter applies the same non-destructive start/end trim and minimum/maximum relative-level gate before either analysis engine runs. Original recording playback is unchanged.
 
-Voice Lab can compare Web Audio/local DSP, Meyda, and lazily loaded Essentia.js analysis. Melody mode additionally offers Spotify Basic Pitch, whose local TensorFlow.js model produces note onset, duration, pitch, and velocity data. The external model and WASM assets are bundled locally rather than fetched from a third-party service.
+Voice Lab can compare Web Audio/local DSP, Meyda, and lazily loaded Essentia.js analysis. Melody mode additionally offers Spotify Basic Pitch, whose local TensorFlow.js model produces note onset, duration, pitch, and velocity data. Melody notes stay on the shared analysis clock, are clipped to measured voiced regions, and retain note-local pitch-bend and gain curves; the combined result uses one coherent set of note boundaries rather than inventing consensus notes. The external model and WASM assets are bundled locally rather than fetched from a third-party service.
 
 Beat results include an event-review stage. Users can add, remove, retime, and resize detected hits; events sharing a label are regrouped onto one digital voice. Suggested tone, decay, and volume values remain editable before previewing or copying the complete config, and the source can be re-analyzed without re-recording.
 
-After creating an initial effect config, Voice Lab uses `OfflineAudioContext` to render a capped set of candidates, analyzes each render with the selected Web Audio/local DSP or Meyda adapter, and keeps the closest feature match. If offline rendering is unavailable, it retains the initial generated config. Audio Lab uses the same renderer for preview and exposes the new primitive parameters for manual fine-tuning.
+After creating an initial effect config, Voice Lab uses `OfflineAudioContext` to render a capped set of candidates, analyzes each render with the selected adapter, and keeps the closest feature match. Fitting changes timbre and layer balance without moving event timing, strongly penalizes energy in target silences, and also fits the fused final effect. If offline rendering is unavailable, it retains the initial generated config. Audio Lab uses the same renderer for preview and exposes the procedural primitive parameters for manual fine-tuning.
 
 ## Licensing
 

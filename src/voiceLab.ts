@@ -171,6 +171,8 @@ let generatedResults: ProceduralResult[] = [];
 let activePreviewEngine: ResultEngineId | undefined;
 let previewElapsedMs = 0;
 let previewRunId = 0;
+let originalOverlayTimer: number | undefined;
+let originalOverlayToken = 0;
 const preview = new ProceduralPreview(previewModalAudio);
 
 const renderPreviewModalWaveform = (): void => {
@@ -197,10 +199,21 @@ const renderPreviewModalWaveform = (): void => {
   previewModalSelection.style.width = `${Math.max(0, end - start)}%`;
 };
 
-const stopPreviewPlayback = (): void => {
-  previewRunId += 1;
-  preview.stop();
+const cancelOriginalOverlay = (): void => {
+  originalOverlayToken += 1;
+  if (originalOverlayTimer !== undefined) window.clearTimeout(originalOverlayTimer);
+  originalOverlayTimer = undefined;
   previewOriginalAudio.pause();
+};
+
+const stopPreviewAudio = (): void => {
+  previewRunId += 1;
+  cancelOriginalOverlay();
+  preview.stop();
+};
+
+const stopPreviewPlayback = (): void => {
+  stopPreviewAudio();
   activePreviewEngine = undefined;
   previewElapsedMs = 0;
   previewModalTime.textContent = '0.0s';
@@ -311,7 +324,7 @@ const setFilterFromPosition = (name: FilterHandleName, clientX: number, clientY:
 
 const markFilterChanged = (): void => {
   generatedResults = [];
-  preview.stop();
+  stopPreviewAudio();
   activePreviewEngine = undefined;
   renderResults();
   setResultStatus('Filter changed');
@@ -525,7 +538,10 @@ const rebuildBeatGroups = (config: BeatConfig): void => {
         groups.set(label.toLocaleLowerCase(), group);
       }
       group.hits.push(hit);
-      const step = Math.round(hit.startMs / stepMs) % config.stepCount;
+      const step = Math.max(
+        0,
+        Math.min(config.stepCount - 1, Math.round(hit.startMs / stepMs))
+      );
       group.steps[step] = Math.max(group.steps[step] ?? 0, hit.velocity);
     }
   }
@@ -592,7 +608,7 @@ const renderBeatEditor = (
   const subdivisionLabel = document.createElement('label');
   subdivisionLabel.textContent = 'Grid divisions per beat';
   const subdivision = document.createElement('select');
-  for (const value of [1, 2, 4, 8]) {
+  for (const value of [1, 2, 3, 4, 6, 8]) {
     const option = document.createElement('option');
     option.value = `${value}`;
     option.textContent = `${value}`;
@@ -644,8 +660,9 @@ const renderBeatEditor = (
       lane.voice.frequency = value;
       renderResults();
     }));
-    addField('Decay (ms)', numberEditor(lane.voice.decayMs, 20, 500, 5, (value) => {
+    addField('Decay (ms)', numberEditor(lane.voice.decayMs, 1, 500, 1, (value) => {
       lane.voice.decayMs = value;
+      for (const hit of lane.hits) hit.durationMs = value;
       renderResults();
     }));
     addField('Volume', numberEditor(lane.voice.volume, 0.01, 1, 0.01, (value) => {
@@ -681,7 +698,7 @@ const renderBeatEditor = (
       renderResults();
     });
     time.setAttribute('aria-label', `Event ${index + 1} time in milliseconds`);
-    const velocity = numberEditor(hit.velocity, 0.05, 1, 0.05, (value) => {
+    const velocity = numberEditor(hit.velocity, 0.005, 1, 0.005, (value) => {
       hit.velocity = value;
       rebuildBeatGroups(result.config);
       renderResults();
@@ -730,26 +747,36 @@ const updateFilterPlayhead = (result: ProceduralResult, elapsedMs: number): void
   previewModalTime.textContent = `${(Math.max(0, elapsedMs) / 1000).toFixed(1)}s`;
 };
 
-const playOriginalOverlay = (result: ProceduralResult, elapsedMs = 0): void => {
+const playOriginalOverlay = (
+  result: ProceduralResult,
+  elapsedMs = 0,
+  delayMs = 0
+): void => {
+  cancelOriginalOverlay();
+  const overlayToken = originalOverlayToken;
   if (!previewOriginalEnabled.checked || recordingUrl === undefined) {
-    previewOriginalAudio.pause();
     return;
   }
   const duration = decodedRecording?.duration ?? 0;
   const startSeconds = filterNumber(filterStartInput, 0)
     + Math.max(0, result.features.sourceStartMs + elapsedMs) / 1000;
+  previewOriginalAudio.pause();
   previewOriginalAudio.currentTime = Math.max(0, Math.min(duration, startSeconds));
-  void previewOriginalAudio.play().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    captureMessage.value = `Original recording preview failed: ${message}`;
-  });
+  const startPlayback = (): void => {
+    originalOverlayTimer = undefined;
+    if (overlayToken !== originalOverlayToken || !previewOriginalEnabled.checked) return;
+    void previewOriginalAudio.play().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      captureMessage.value = `Original recording preview failed: ${message}`;
+    });
+  };
+  if (delayMs > 0) originalOverlayTimer = window.setTimeout(startPlayback, delayMs);
+  else startPlayback();
 };
 
 const startModalResult = (result: ProceduralResult): void => {
-  previewRunId += 1;
+  stopPreviewAudio();
   const runId = previewRunId;
-  preview.stop();
-  previewOriginalAudio.pause();
   recordingPlayback.pause();
   activePreviewEngine = result.engine;
   previewResultSelect.value = result.engine;
@@ -759,15 +786,16 @@ const startModalResult = (result: ProceduralResult): void => {
   updatePreviewButtons();
   const playCycle = (): void => {
     if (runId !== previewRunId || activePreviewEngine !== result.engine) return;
+    cancelOriginalOverlay();
     previewElapsedMs = 0;
-    playOriginalOverlay(result);
     void preview.play(
       result,
       (elapsedMs) => {
         previewElapsedMs = elapsedMs;
         updateFilterPlayhead(result, elapsedMs);
       },
-      playCycle
+      playCycle,
+      (leadMs) => playOriginalOverlay(result, 0, leadMs)
     ).catch((error: unknown) => {
       stopPreviewPlayback();
       const message = error instanceof Error ? error.message : String(error);
@@ -911,7 +939,7 @@ const cleanCaptureResources = (): void => {
 };
 
 const decodeRecording = async (blob: Blob, sourceLabel: string): Promise<void> => {
-  preview.stop();
+  stopPreviewAudio();
   activePreviewEngine = undefined;
   generatedResults = [];
   renderResults();
@@ -965,7 +993,7 @@ const startRecording = async (): Promise<void> => {
     return;
   }
   try {
-    preview.stop();
+    stopPreviewAudio();
     recordingPlayback.pause();
     generatedResults = [];
     renderResults();
@@ -1023,7 +1051,7 @@ const generateConfigs = async (): Promise<void> => {
     captureMessage.value = 'Select at least one analysis engine.';
     return;
   }
-  preview.stop();
+  stopPreviewAudio();
   activePreviewEngine = undefined;
   generatedResults = [];
   analyzeButton.disabled = true;
@@ -1076,7 +1104,38 @@ const generateConfigs = async (): Promise<void> => {
     }
   }
   const combined = combineProceduralResults(generatedResults);
-  if (combined !== undefined) generatedResults.push(combined);
+  if (combined !== undefined) {
+    if (combined.mode === 'effect') {
+      const fitEngine = engines.includes('meyda') ? 'meyda' : engines[0];
+      const fitAdapter = fitEngine === undefined ? undefined : analysisAdapter(fitEngine);
+      if (fitAdapter !== undefined) {
+        try {
+          setResultStatus('Fitting final');
+          const fitted = await fitEffectConfig(
+            combined.config,
+            combined.features,
+            fitAdapter,
+            (completed, total) => {
+              resultsSummary.textContent = `Final effect: fitting procedural render ${completed}/${total}…`;
+            }
+          );
+          const improvement = fitted.initialLoss > 0
+            ? Math.max(0, 1 - fitted.finalLoss / fitted.initialLoss)
+            : 0;
+          combined.config = fitted.config;
+          combined.fit = {
+            candidateCount: fitted.candidateCount,
+            finalLoss: fitted.finalLoss,
+            improvement,
+          };
+          combined.summary += ` Render fitting evaluated ${fitted.candidateCount} evidence-preserving candidates.`;
+        } catch {
+          captureMessage.value = 'The fused effect was generated, but its final offline fit was unavailable.';
+        }
+      }
+    }
+    generatedResults.push(combined);
+  }
   analyzeButton.disabled = false;
   setResultStatus(generatedResults.length > 0 ? 'Generated' : 'Try again');
   resultsSummary.textContent = generatedResults.some((result) => result.engine === 'combined')
@@ -1093,7 +1152,7 @@ const clearRecording = (): void => {
     recorder.stop();
   }
   cleanCaptureResources();
-  preview.stop();
+  stopPreviewAudio();
   activePreviewEngine = undefined;
   decodedRecording = undefined;
   decodedRecordingPeak = 1;
@@ -1122,7 +1181,7 @@ for (const button of modeButtons) {
     if (mode !== 'effect' && mode !== 'beat' && mode !== 'melody') return;
     selectedMode = mode;
     generatedResults = [];
-    preview.stop();
+    stopPreviewAudio();
     activePreviewEngine = undefined;
     renderMode();
     renderResults();
@@ -1146,7 +1205,7 @@ recordingFile.addEventListener('change', () => {
   if (file !== undefined) void decodeRecording(file, 'Audio file');
 });
 recordingPlayback.addEventListener('play', () => {
-  preview.stop();
+  stopPreviewAudio();
   activePreviewEngine = undefined;
   updatePreviewButtons();
 });
@@ -1177,7 +1236,7 @@ previewOriginalEnabled.addEventListener('change', () => {
   if (previewOriginalEnabled.checked && result !== undefined && activePreviewEngine !== undefined) {
     playOriginalOverlay(result, previewElapsedMs);
   } else {
-    previewOriginalAudio.pause();
+    cancelOriginalOverlay();
   }
 });
 previewOriginalVolume.addEventListener('input', () => {
