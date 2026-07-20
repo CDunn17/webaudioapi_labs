@@ -5,6 +5,15 @@ import {
   type GameMusicConfig,
   type MusicScaleName,
 } from './config/music';
+import {
+  VOICE_EDITOR_RESULT,
+  cloneConfig,
+  isVoiceEditorLoadMessage,
+  isVoiceEditorRequestMessage,
+  previewResult,
+} from './voice/editorBridge';
+import { ProceduralPreview } from './voice/preview';
+import type { MelodyConfig } from './voice/types';
 
 type MusicSection = 'score' | 'tone' | 'pulse';
 
@@ -580,10 +589,14 @@ class MusicPreview {
 let draft = cloneMusicConfig(GAME_MUSIC);
 let selectedSection: MusicSection = 'score';
 let activePulseStep: number | undefined;
+let embeddedMelodyConfig: MelodyConfig | undefined;
+let embeddedMelodyOriginal: MelodyConfig | undefined;
+let embeddedMelodyPlaying = false;
 const preview = new MusicPreview(draft, (stepIndex) => {
   activePulseStep = stepIndex;
   updatePulseStepHighlight();
 });
+const embeddedPreview = new ProceduralPreview();
 
 const sectionList = document.getElementById('section-list');
 const editorTitle = document.getElementById('editor-title');
@@ -651,8 +664,9 @@ const renderExamples = (): void => {
 };
 
 const updateTransport = (): void => {
-  playToggleButton.textContent = preview.playing() ? 'Stop' : 'Play';
-  playbackStatus.textContent = preview.playing() ? 'Playing' : 'Stopped';
+  const playing = embeddedMelodyConfig === undefined ? preview.playing() : embeddedMelodyPlaying;
+  playToggleButton.textContent = playing ? 'Stop' : 'Play';
+  playbackStatus.textContent = playing ? 'Playing' : 'Stopped';
 };
 
 const updatePulseStepHighlight = (): void => {
@@ -1042,7 +1056,163 @@ const renderReference = (): void => {
   }
 };
 
+const melodyNumberField = (
+  labelText: string,
+  value: number,
+  minimum: number,
+  maximum: number,
+  step: number,
+  onChange: (value: number) => void
+): HTMLLabelElement => {
+  const label = document.createElement('label');
+  const text = document.createElement('span');
+  const input = document.createElement('input');
+  text.textContent = labelText;
+  input.type = 'number';
+  input.min = `${minimum}`;
+  input.max = `${maximum}`;
+  input.step = `${step}`;
+  input.value = `${value}`;
+  input.addEventListener('input', () => {
+    const parsed = Number(input.value);
+    if (!Number.isFinite(parsed)) return;
+    onChange(clamp(parsed, minimum, maximum));
+  });
+  label.append(text, input);
+  return label;
+};
+
+const renderMelodyEditor = (): void => {
+  const config = embeddedMelodyConfig;
+  if (config === undefined) return;
+  editorTitle.textContent = 'Generated melody';
+  editorSummary.textContent = 'Edit the detected note timeline and synth tone.';
+  masterVolume.value = `${config.masterVolume}`;
+  intensity.closest('label')?.setAttribute('hidden', '');
+  exampleSelect.closest('label')?.setAttribute('hidden', '');
+
+  const sectionButton = document.createElement('button');
+  sectionButton.type = 'button';
+  sectionButton.textContent = 'Generated melody';
+  sectionButton.className = 'is-active';
+  sectionList.replaceChildren(sectionButton);
+
+  const globals = document.createElement('section');
+  globals.className = 'voice-config-card';
+  const globalHeading = document.createElement('div');
+  globalHeading.className = 'voice-config-toolbar';
+  const globalTitle = document.createElement('h3');
+  globalTitle.textContent = 'Melody synth';
+  const addNote = document.createElement('button');
+  addNote.className = 'secondary-button';
+  addNote.type = 'button';
+  addNote.textContent = 'Add note';
+  addNote.addEventListener('click', () => {
+    const lastNote = config.notes[config.notes.length - 1];
+    const startMs = lastNote === undefined ? 0 : lastNote.startMs + lastNote.durationMs;
+    config.notes.push({
+      durationMs: 300,
+      midi: lastNote?.midi ?? 60,
+      startMs,
+      velocity: lastNote?.velocity ?? 0.7,
+    });
+    config.durationMs = Math.max(config.durationMs, startMs + 300);
+    render();
+  });
+  globalHeading.append(globalTitle, addNote);
+  const globalFields = document.createElement('div');
+  globalFields.className = 'voice-config-fields';
+  const oscillatorLabel = document.createElement('label');
+  const oscillatorText = document.createElement('span');
+  const oscillator = document.createElement('select');
+  oscillatorText.textContent = 'Oscillator';
+  for (const value of oscillatorTypes) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    oscillator.append(option);
+  }
+  oscillator.value = config.oscillatorType;
+  oscillator.addEventListener('change', () => {
+    if (isOscillatorType(oscillator.value)) config.oscillatorType = oscillator.value;
+  });
+  oscillatorLabel.append(oscillatorText, oscillator);
+  globalFields.append(
+    oscillatorLabel,
+    melodyNumberField('Filter (Hz)', config.filterFrequency, 20, 20_000, 10, (value) => {
+      config.filterFrequency = value;
+    }),
+    melodyNumberField('Duration (ms)', config.durationMs, 20, 120_000, 10, (value) => {
+      config.durationMs = value;
+    })
+  );
+  globals.append(globalHeading, globalFields);
+
+  const notes = document.createElement('div');
+  notes.className = 'voice-config-grid';
+  config.notes.forEach((note, index) => {
+    const card = document.createElement('section');
+    card.className = 'voice-config-card';
+    const heading = document.createElement('div');
+    heading.className = 'voice-config-card-header';
+    const title = document.createElement('h3');
+    title.textContent = `Note ${index + 1}`;
+    const remove = document.createElement('button');
+    remove.className = 'secondary-button';
+    remove.type = 'button';
+    remove.textContent = 'Remove note';
+    remove.addEventListener('click', () => {
+      config.notes.splice(index, 1);
+      render();
+    });
+    heading.append(title, remove);
+    const fields = document.createElement('div');
+    fields.className = 'voice-config-fields';
+    fields.append(
+      melodyNumberField('MIDI note', note.midi, 0, 127, 1, (value) => {
+        note.midi = Math.round(value);
+      }),
+      melodyNumberField('Start (ms)', note.startMs, 0, 120_000, 1, (value) => {
+        note.startMs = value;
+      }),
+      melodyNumberField('Duration (ms)', note.durationMs, 20, 30_000, 1, (value) => {
+        note.durationMs = value;
+      }),
+      melodyNumberField('Velocity', note.velocity, 0.01, 1, 0.01, (value) => {
+        note.velocity = value;
+      }),
+      melodyNumberField(
+        'Note filter (Hz)',
+        note.filterFrequency ?? config.filterFrequency,
+        20,
+        20_000,
+        10,
+        (value) => {
+          note.filterFrequency = value;
+        }
+      )
+    );
+    card.append(heading, fields);
+    notes.append(card);
+  });
+  parameterGrid.replaceChildren(globals, notes);
+
+  const reference = document.createElement('article');
+  reference.className = 'reference-item';
+  const referenceTitle = document.createElement('h3');
+  const referenceBody = document.createElement('p');
+  referenceTitle.textContent = 'Melody result';
+  referenceBody.textContent = 'MIDI controls pitch; start and duration preserve the detected performance timeline. Existing gain and pitch-bend curves remain attached to each note.';
+  reference.append(referenceTitle, referenceBody);
+  referenceList.replaceChildren(reference);
+};
+
 const render = (): void => {
+  if (embeddedMelodyConfig !== undefined) {
+    renderMelodyEditor();
+    updateTransport();
+    return;
+  }
   const section = sections.find((item) => item.key === selectedSection);
   editorTitle.textContent = section?.label ?? 'Score';
   editorSummary.textContent = section?.summary ?? '';
@@ -1055,21 +1225,25 @@ const render = (): void => {
 };
 
 const copyConfig = async (): Promise<void> => {
-  const configText = `export const GAME_MUSIC: GameMusicConfig = ${JSON.stringify(
-    draft,
-    null,
-    2
-  )};`;
+  const configText = embeddedMelodyConfig === undefined
+    ? `export const GAME_MUSIC: GameMusicConfig = ${JSON.stringify(draft, null, 2)};`
+    : `export const GENERATED_MELODY = ${JSON.stringify(embeddedMelodyConfig, null, 2)};`;
 
   try {
     await navigator.clipboard.writeText(configText);
-    copyStatus.value = 'Copied GAME_MUSIC config.';
+    copyStatus.value = embeddedMelodyConfig === undefined
+      ? 'Copied GAME_MUSIC config.'
+      : 'Copied generated melody config.';
   } catch {
     copyStatus.value = configText;
   }
 };
 
 masterVolume.addEventListener('input', () => {
+  if (embeddedMelodyConfig !== undefined) {
+    embeddedMelodyConfig.masterVolume = Number(masterVolume.value);
+    return;
+  }
   draft.masterVolume = Number(masterVolume.value);
   syncPreview();
 });
@@ -1080,6 +1254,29 @@ intensity.addEventListener('input', () => {
 });
 
 playToggleButton.addEventListener('click', () => {
+  if (embeddedMelodyConfig !== undefined) {
+    if (embeddedMelodyPlaying) {
+      embeddedPreview.stop();
+      embeddedMelodyPlaying = false;
+      updateTransport();
+      return;
+    }
+    embeddedMelodyPlaying = true;
+    updateTransport();
+    void embeddedPreview.play(
+      previewResult('melody', embeddedMelodyConfig),
+      () => undefined,
+      () => {
+        embeddedMelodyPlaying = false;
+        updateTransport();
+      }
+    ).catch((error: unknown) => {
+      embeddedMelodyPlaying = false;
+      updateTransport();
+      copyStatus.value = error instanceof Error ? error.message : String(error);
+    });
+    return;
+  }
   if (preview.playing()) {
     preview.stop();
     updateTransport();
@@ -1090,6 +1287,13 @@ playToggleButton.addEventListener('click', () => {
 });
 
 resetButton.addEventListener('click', () => {
+  if (embeddedMelodyConfig !== undefined && embeddedMelodyOriginal !== undefined) {
+    embeddedPreview.stop();
+    embeddedMelodyPlaying = false;
+    embeddedMelodyConfig = cloneConfig(embeddedMelodyOriginal);
+    render();
+    return;
+  }
   preview.stop();
   draft = cloneMusicConfig(GAME_MUSIC);
   exampleSelect.value = '';
@@ -1117,16 +1321,63 @@ exampleSelect.addEventListener('change', () => {
 
 window.addEventListener('beforeunload', () => {
   preview.stop();
+  embeddedPreview.stop();
 });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     preview.stop();
+    embeddedPreview.stop();
+    embeddedMelodyPlaying = false;
     updateTransport();
   }
 });
 window.addEventListener('pagehide', () => {
   preview.refreshContext();
+  embeddedPreview.close();
   updateTransport();
+});
+
+const loadEmbeddedMelody = (config: MelodyConfig): void => {
+  preview.stop();
+  embeddedPreview.stop();
+  embeddedMelodyPlaying = false;
+  embeddedMelodyConfig = cloneConfig(config);
+  embeddedMelodyOriginal = cloneConfig(config);
+  document.body.classList.add('embedded-lab');
+  const appTitle = document.querySelector('.app-header h1');
+  const appSummary = document.querySelector('.app-header p');
+  if (appTitle !== null) appTitle.textContent = 'Music Lab';
+  if (appSummary !== null) appSummary.textContent = 'Editing a generated Voice Lab melody.';
+  render();
+};
+
+window.addEventListener('message', (event) => {
+  if (event.origin !== window.location.origin || event.source !== window.parent) return;
+  if (isVoiceEditorLoadMessage(event.data)) {
+    if (event.data.mode === 'melody' && 'notes' in event.data.config) {
+      loadEmbeddedMelody(event.data.config as MelodyConfig);
+    }
+    return;
+  }
+  if (
+    !isVoiceEditorRequestMessage(event.data) ||
+    embeddedMelodyConfig === undefined
+  ) return;
+
+  const contentDurationMs = embeddedMelodyConfig.notes.reduce(
+    (duration, note) => Math.max(duration, note.startMs + note.durationMs),
+    0
+  );
+  embeddedMelodyConfig.durationMs = Math.max(
+    embeddedMelodyConfig.durationMs,
+    contentDurationMs
+  );
+  window.parent.postMessage({
+    config: cloneConfig(embeddedMelodyConfig),
+    mode: 'melody',
+    requestId: event.data.requestId,
+    type: VOICE_EDITOR_RESULT,
+  }, window.location.origin);
 });
 
 renderExamples();

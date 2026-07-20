@@ -87,6 +87,40 @@
             </label>
           </div>
 
+          <fieldset class="voice-library">
+            <legend>Mode library</legend>
+            <p>Samples and configs here belong to the active mode. Switching modes keeps each workspace intact.</p>
+            <div class="voice-library-grid">
+              <div class="voice-library-group">
+                <strong>Samples</strong>
+                <label>
+                  <span>Save as</span>
+                  <input id="sample-save-name" type="text" maxlength="80" placeholder="Sample name" />
+                </label>
+                <button class="secondary-button" id="save-sample" type="button" disabled>Save current sample</button>
+                <label>
+                  <span>Saved samples</span>
+                  <select id="sample-library-select"></select>
+                </label>
+                <button class="secondary-button" id="load-sample" type="button" disabled>Load sample</button>
+              </div>
+              <div class="voice-library-group">
+                <strong>Configs</strong>
+                <label>
+                  <span>Saved configs</span>
+                  <select id="config-library-select"></select>
+                </label>
+                <button class="secondary-button" id="load-config" type="button" disabled>Load config</button>
+                <label class="secondary-button file-button" for="config-file">
+                  Import config file
+                  <input id="config-file" type="file" accept="application/json,.json" />
+                </label>
+                <button class="secondary-button" id="refresh-library" type="button">Refresh library</button>
+              </div>
+            </div>
+            <output class="copy-status" id="library-message" aria-live="polite"></output>
+          </fieldset>
+
           <fieldset class="analysis-engine-picker">
             <legend>Analysis engines</legend>
             <label>
@@ -109,7 +143,7 @@
 
           <fieldset class="recording-filters">
             <legend>Analysis filter</legend>
-            <p>The graph fits each recording's full duration and peak level. Drag its edges to keep only the time span and level range you want analyzed.</p>
+            <p>Drag the graph edges to choose the time span and level range you want analyzed, then set the filter to expand that selection across the preview.</p>
             <div class="recording-filter-visual" id="filter-visual" aria-label="Visual analysis filter">
               <canvas id="filter-waveform"></canvas>
               <div class="filter-selection" id="filter-selection"></div>
@@ -139,7 +173,10 @@
                 <input id="filter-max-level" type="number" min="0" max="100" step="1" value="100" />
               </label>
             </div>
-            <button class="secondary-button" id="reset-filters" type="button">Reset filter</button>
+            <div class="recording-filter-actions">
+              <button class="primary-button" id="set-filter" type="button" disabled>Set filter</button>
+              <button class="secondary-button" id="reset-filters" type="button">Reset filter</button>
+            </div>
           </fieldset>
 
           <div class="transport-row">
@@ -213,6 +250,29 @@
           </div>
           <audio id="preview-modal-audio" autoplay hidden></audio>
           <audio id="preview-original-audio" hidden></audio>
+        </div>
+      </div>
+
+      <div class="config-editor-modal" id="config-editor-modal" hidden role="dialog" aria-modal="true" aria-labelledby="config-editor-title">
+        <div class="config-editor-modal-card">
+          <div class="preview-modal-heading">
+            <div>
+              <span id="config-editor-kicker">Audio Lab</span>
+              <h2 id="config-editor-title">Edit procedural result</h2>
+            </div>
+            <button class="secondary-button" id="config-editor-close" type="button">Cancel</button>
+          </div>
+          <iframe
+            id="config-editor-frame"
+            title="Procedural config editor"
+          ></iframe>
+          <div class="config-editor-footer">
+            <output class="copy-status" id="config-editor-status" aria-live="polite"></output>
+            <div class="transport-row">
+              <button class="secondary-button" id="config-editor-cancel" type="button">Cancel</button>
+              <button class="primary-button" id="config-editor-apply" type="button">Apply changes</button>
+            </div>
+          </div>
         </div>
       </div>
     </main>

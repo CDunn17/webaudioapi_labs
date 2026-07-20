@@ -840,4 +840,4 @@ export const analysisAdapter = (id: AnalysisAdapter['id']): AnalysisAdapter | un
   ANALYSIS_ADAPTERS.find((adapter) => adapter.id === id);
 
 export const analysisEngineLabel = (id: ResultEngineId): string =>
-  id === 'combined' ? 'Combined result' : analysisAdapter(id)?.label ?? id;
+  id === 'combined' ? 'Imported config' : analysisAdapter(id)?.label ?? id;

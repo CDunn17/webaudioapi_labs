@@ -11,6 +11,15 @@ import {
   type ToneSoundConfig,
 } from './config/audio';
 import { renderEffectLayers } from './voice/effectRenderer';
+import {
+  VOICE_EDITOR_RESULT,
+  cloneConfig,
+  isVoiceEditorLoadMessage,
+  isVoiceEditorRequestMessage,
+  previewResult,
+} from './voice/editorBridge';
+import { ProceduralPreview } from './voice/preview';
+import type { BeatConfig } from './voice/types';
 
 type SoundId =
   | 'thrust'
@@ -23,7 +32,8 @@ type SoundId =
   | 'coreCrashNoise'
   | 'countdown'
   | 'countdownFinal'
-  | 'dailyFinish';
+  | 'dailyFinish'
+  | 'voiceResult';
 
 type ProcessorConfig = {
   kind: 'reserved';
@@ -1247,6 +1257,10 @@ let loopTimer: number | undefined;
 let playbackEndTimer: number | undefined;
 let playbackRequestId = 0;
 let sustainedRestartTimer: number | undefined;
+let embeddedEditorMode: 'effect' | 'beat' | undefined;
+let embeddedBeatConfig: BeatConfig | undefined;
+let embeddedBeatOriginal: BeatConfig | undefined;
+const embeddedPreview = new ProceduralPreview();
 
 const soundSelect = document.getElementById('sound-select');
 const soundList = document.getElementById('sound-list');
@@ -1331,6 +1345,7 @@ const stopPlayback = (): void => {
   clearPlaybackEndTimer();
   clearSustainedRestartTimer();
   audio.stop();
+  embeddedPreview.stop();
   isPlaying = false;
   updateTransportControls();
 };
@@ -1386,6 +1401,24 @@ const playSelectedSound = async (
 const togglePlayback = (): void => {
   if (isPlaying) {
     stopPlayback();
+    return;
+  }
+
+  if (embeddedEditorMode === 'beat' && embeddedBeatConfig !== undefined) {
+    isPlaying = true;
+    updateTransportControls();
+    void embeddedPreview.play(
+      previewResult('beat', embeddedBeatConfig),
+      () => undefined,
+      () => {
+        isPlaying = false;
+        updateTransportControls();
+      }
+    ).catch((error: unknown) => {
+      isPlaying = false;
+      updateTransportControls();
+      copyStatus.value = error instanceof Error ? error.message : String(error);
+    });
     return;
   }
 
@@ -1564,6 +1597,19 @@ const renderSoundList = (): void => {
   soundSelect.replaceChildren();
   soundList.replaceChildren();
 
+  if (embeddedEditorMode === 'beat') {
+    const option = document.createElement('option');
+    option.value = 'voiceResult';
+    option.textContent = 'Generated beatbox';
+    soundSelect.append(option);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Generated beatbox';
+    button.className = 'is-active';
+    soundList.append(button);
+    return;
+  }
+
   for (const sound of sounds) {
     const option = document.createElement('option');
     option.value = sound.id;
@@ -1591,6 +1637,16 @@ const selectSound = (id: SoundId): void => {
 
 const render = (): void => {
   renderSoundList();
+  if (embeddedEditorMode === 'beat') {
+    editorTitle.textContent = 'Generated beatbox';
+    editorSummary.textContent = 'Edit the detected timeline and each digital drum voice.';
+    soundKind.textContent = 'beat';
+    loopControl.hidden = true;
+    renderBeatParameters();
+    renderBeatReference();
+    updateTransportControls();
+    return;
+  }
   editorTitle.textContent = selectedSound.title;
   editorSummary.textContent = selectedSound.summary;
   soundKind.textContent = selectedSound.kind;
@@ -1607,6 +1663,216 @@ const renderParameters = (): void => {
   }
 
   renderSustainedParameters(selectedSound);
+};
+
+const beatNumberField = (
+  labelText: string,
+  value: number,
+  minimum: number,
+  maximum: number,
+  step: number,
+  onChange: (value: number) => void
+): HTMLLabelElement => {
+  const label = document.createElement('label');
+  const text = document.createElement('span');
+  const input = document.createElement('input');
+  text.textContent = labelText;
+  input.type = 'number';
+  input.min = `${minimum}`;
+  input.max = `${maximum}`;
+  input.step = `${step}`;
+  input.value = `${value}`;
+  input.addEventListener('input', () => {
+    const parsed = Number(input.value);
+    if (!Number.isFinite(parsed)) return;
+    onChange(Math.min(maximum, Math.max(minimum, parsed)));
+  });
+  label.append(text, input);
+  return label;
+};
+
+const syncBeatSteps = (config: BeatConfig): void => {
+  const stepMs = 60_000 / Math.max(1, config.bpm) / Math.max(1, config.stepsPerBeat);
+  config.stepCount = Math.max(1, Math.round(config.stepCount));
+  for (const lane of config.lanes) {
+    lane.steps = Array.from({ length: config.stepCount }, () => 0);
+    for (const hit of lane.hits) {
+      const index = Math.max(0, Math.min(config.stepCount - 1, Math.round(hit.startMs / stepMs)));
+      lane.steps[index] = Math.max(lane.steps[index] ?? 0, hit.velocity);
+    }
+  }
+};
+
+const renderBeatParameters = (): void => {
+  parameterGrid.replaceChildren();
+  const config = embeddedBeatConfig;
+  if (config === undefined) return;
+
+  const globals = document.createElement('section');
+  globals.className = 'voice-config-card';
+  const globalHeading = document.createElement('div');
+  globalHeading.className = 'voice-config-toolbar';
+  const globalTitle = document.createElement('h3');
+  globalTitle.textContent = 'Pattern';
+  const addLane = document.createElement('button');
+  addLane.className = 'secondary-button';
+  addLane.type = 'button';
+  addLane.textContent = 'Add lane';
+  addLane.addEventListener('click', () => {
+    const laneNumber = config.lanes.length + 1;
+    config.lanes.push({
+      hits: [],
+      label: `Voice ${laneNumber}`,
+      steps: Array.from({ length: config.stepCount }, () => 0),
+      voice: {
+        decayMs: 120,
+        frequency: 180,
+        kind: 'snare',
+        noiseAmount: 0.5,
+        volume: 0.2,
+      },
+    });
+    render();
+  });
+  globalHeading.append(globalTitle, addLane);
+  const globalFields = document.createElement('div');
+  globalFields.className = 'voice-config-fields';
+  globalFields.append(
+    beatNumberField('Tempo (BPM)', config.bpm, 30, 300, 1, (value) => {
+      config.bpm = value;
+    }),
+    beatNumberField('Duration (ms)', config.durationMs, 100, 60_000, 10, (value) => {
+      config.durationMs = value;
+    }),
+    beatNumberField('Grid divisions per beat', config.stepsPerBeat, 1, 8, 1, (value) => {
+      config.stepsPerBeat = Math.round(value);
+    }),
+    beatNumberField('Grid steps', config.stepCount, 1, 128, 1, (value) => {
+      config.stepCount = Math.round(value);
+    })
+  );
+  globals.append(globalHeading, globalFields);
+  parameterGrid.append(globals);
+
+  config.lanes.forEach((lane, laneIndex) => {
+    const card = document.createElement('section');
+    card.className = 'voice-config-card';
+    const heading = document.createElement('div');
+    heading.className = 'voice-config-card-header';
+    const label = document.createElement('input');
+    label.className = 'layer-name-input';
+    label.value = lane.label;
+    label.setAttribute('aria-label', `Lane ${laneIndex + 1} label`);
+    label.addEventListener('input', () => {
+      lane.label = label.value;
+      for (const hit of lane.hits) hit.label = label.value;
+    });
+    const removeLane = document.createElement('button');
+    removeLane.className = 'secondary-button';
+    removeLane.type = 'button';
+    removeLane.textContent = 'Remove lane';
+    removeLane.disabled = config.lanes.length <= 1;
+    removeLane.addEventListener('click', () => {
+      config.lanes.splice(laneIndex, 1);
+      render();
+    });
+    heading.append(label, removeLane);
+
+    const fields = document.createElement('div');
+    fields.className = 'voice-config-fields';
+    const kindLabel = document.createElement('label');
+    const kindText = document.createElement('span');
+    const kind = document.createElement('select');
+    kindText.textContent = 'Voice type';
+    for (const value of ['kick', 'snare', 'hat'] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      kind.append(option);
+    }
+    kind.value = lane.voice.kind;
+    kind.addEventListener('change', () => {
+      if (kind.value === 'kick' || kind.value === 'snare' || kind.value === 'hat') {
+        lane.voice.kind = kind.value;
+      }
+    });
+    kindLabel.append(kindText, kind);
+    fields.append(
+      kindLabel,
+      beatNumberField('Tone (Hz)', lane.voice.frequency, 20, 8_000, 1, (value) => {
+        lane.voice.frequency = value;
+      }),
+      beatNumberField('Noise amount', lane.voice.noiseAmount, 0, 1, 0.01, (value) => {
+        lane.voice.noiseAmount = value;
+      }),
+      beatNumberField('Decay (ms)', lane.voice.decayMs, 1, 2_000, 1, (value) => {
+        lane.voice.decayMs = value;
+      }),
+      beatNumberField('Volume', lane.voice.volume, 0, 1, 0.01, (value) => {
+        lane.voice.volume = value;
+      })
+    );
+
+    const events = document.createElement('div');
+    events.className = 'voice-config-events';
+    const eventToolbar = document.createElement('div');
+    eventToolbar.className = 'voice-config-toolbar';
+    const eventTitle = document.createElement('strong');
+    eventTitle.textContent = `Events (${lane.hits.length})`;
+    const addEvent = document.createElement('button');
+    addEvent.className = 'secondary-button';
+    addEvent.type = 'button';
+    addEvent.textContent = 'Add event';
+    addEvent.addEventListener('click', () => {
+      lane.hits.push({
+        durationMs: lane.voice.decayMs,
+        label: lane.label,
+        startMs: Math.min(config.durationMs, lane.hits.length * 250),
+        velocity: 0.7,
+      });
+      render();
+    });
+    eventToolbar.append(eventTitle, addEvent);
+    events.append(eventToolbar);
+    lane.hits.forEach((hit, hitIndex) => {
+      const row = document.createElement('div');
+      row.className = 'voice-config-event';
+      row.append(
+        beatNumberField('Start (ms)', hit.startMs, 0, Math.max(100, config.durationMs), 1, (value) => {
+          hit.startMs = value;
+        }),
+        beatNumberField('Duration (ms)', hit.durationMs ?? lane.voice.decayMs, 1, 2_000, 1, (value) => {
+          hit.durationMs = value;
+        }),
+        beatNumberField('Velocity', hit.velocity, 0.005, 1, 0.005, (value) => {
+          hit.velocity = value;
+        })
+      );
+      const removeEvent = document.createElement('button');
+      removeEvent.className = 'secondary-button';
+      removeEvent.type = 'button';
+      removeEvent.textContent = 'Remove';
+      removeEvent.addEventListener('click', () => {
+        lane.hits.splice(hitIndex, 1);
+        render();
+      });
+      row.append(removeEvent);
+      events.append(row);
+    });
+    card.append(heading, fields, events);
+    parameterGrid.append(card);
+  });
+};
+
+const renderBeatReference = (): void => {
+  const item = document.createElement('article');
+  item.className = 'reference-item';
+  const title = document.createElement('h3');
+  const body = document.createElement('p');
+  title.textContent = 'Beatbox result';
+  body.textContent = 'Each lane shares one synthesized voice. Events retain their measured timing, duration, and velocity when changes are applied.';
+  item.append(title, body);
+  referenceList.replaceChildren(item);
 };
 
 const renderLayeredParameters = (sound: LayeredDefinition): void => {
@@ -2245,6 +2511,13 @@ const renderReference = (): void => {
 };
 
 const resetSelected = (): void => {
+  if (embeddedEditorMode === 'beat' && embeddedBeatOriginal !== undefined) {
+    stopPlayback();
+    embeddedBeatConfig = cloneConfig(embeddedBeatOriginal);
+    masterVolume.value = `${embeddedBeatConfig.masterVolume}`;
+    render();
+    return;
+  }
   const sound = selectedSound;
   if (sound.kind === 'layered') sound.draft = layered(sound.original.layers);
   if (sound.kind === 'sustained') {
@@ -2279,6 +2552,9 @@ const configValueText = (value: unknown, indent: number): string => {
 };
 
 const selectedConfigText = (): string => {
+  if (embeddedEditorMode === 'beat' && embeddedBeatConfig !== undefined) {
+    return `export const GENERATED_BEAT = ${JSON.stringify(embeddedBeatConfig, null, 2)};`;
+  }
   const config = selectedSound.draft;
   return `${selectedSound.id}: ${configValueText(config, 0)},`;
 };
@@ -2314,11 +2590,86 @@ copyButton.addEventListener('click', () => {
   void copySelectedConfig();
 });
 masterVolume.addEventListener('input', () => {
+  if (embeddedEditorMode === 'beat' && embeddedBeatConfig !== undefined) {
+    embeddedBeatConfig.masterVolume = Number(masterVolume.value);
+    return;
+  }
   audio.setMasterVolume(Number(masterVolume.value));
 });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') stopPlayback();
 });
-window.addEventListener('pagehide', stopPlayback);
+window.addEventListener('pagehide', () => {
+  stopPlayback();
+  embeddedPreview.close();
+});
+
+const prepareEmbeddedShell = (title: string, summary: string): void => {
+  document.body.classList.add('embedded-lab');
+  const appTitle = document.querySelector('.app-header h1');
+  const appSummary = document.querySelector('.app-header p');
+  if (appTitle !== null) appTitle.textContent = title;
+  if (appSummary !== null) appSummary.textContent = summary;
+};
+
+const loadEmbeddedEffect = (config: LayeredSoundConfig): void => {
+  stopPlayback();
+  embeddedEditorMode = 'effect';
+  embeddedBeatConfig = undefined;
+  embeddedBeatOriginal = undefined;
+  const definition: LayeredDefinition = {
+    draft: layered(config.layers),
+    id: 'voiceResult',
+    kind: 'layered',
+    original: layered(config.layers),
+    summary: 'Fine-tune the generated layers, timing, automation, and synthesis.',
+    title: 'Generated effect',
+  };
+  sounds.splice(0, sounds.length, definition);
+  selectedSound = definition;
+  masterVolume.value = '0.8';
+  prepareEmbeddedShell('Audio Lab', 'Editing a generated Voice Lab effect.');
+  render();
+};
+
+const loadEmbeddedBeat = (config: BeatConfig): void => {
+  stopPlayback();
+  embeddedEditorMode = 'beat';
+  embeddedBeatConfig = cloneConfig(config);
+  embeddedBeatOriginal = cloneConfig(config);
+  masterVolume.value = `${embeddedBeatConfig.masterVolume}`;
+  prepareEmbeddedShell('Audio Lab', 'Editing a generated Voice Lab beatbox pattern.');
+  render();
+};
+
+window.addEventListener('message', (event) => {
+  if (event.origin !== window.location.origin || event.source !== window.parent) return;
+  if (isVoiceEditorLoadMessage(event.data)) {
+    if (event.data.mode === 'effect' && 'layers' in event.data.config) {
+      loadEmbeddedEffect(event.data.config as LayeredSoundConfig);
+    } else if (event.data.mode === 'beat' && 'lanes' in event.data.config) {
+      loadEmbeddedBeat(event.data.config as BeatConfig);
+    }
+    return;
+  }
+  if (!isVoiceEditorRequestMessage(event.data)) return;
+
+  if (embeddedEditorMode === 'effect' && selectedSound.kind === 'layered') {
+    window.parent.postMessage({
+      config: cloneConfig(selectedSound.draft),
+      mode: 'effect',
+      requestId: event.data.requestId,
+      type: VOICE_EDITOR_RESULT,
+    }, window.location.origin);
+  } else if (embeddedEditorMode === 'beat' && embeddedBeatConfig !== undefined) {
+    syncBeatSteps(embeddedBeatConfig);
+    window.parent.postMessage({
+      config: cloneConfig(embeddedBeatConfig),
+      mode: 'beat',
+      requestId: event.data.requestId,
+      type: VOICE_EDITOR_RESULT,
+    }, window.location.origin);
+  }
+});
 
 render();

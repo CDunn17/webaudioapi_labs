@@ -21,6 +21,22 @@ export default defineConfig([
     },
   },
   {
-    ignores: ['dist/**', 'node_modules/**', 'vite.config.ts'],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['vite.config.ts', 'vite/**/*.ts'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      globals: globals.node,
+      parserOptions: {
+        project: ['./tsconfig.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+      'no-unused-vars': 'off',
+    },
+  },
+  {
+    ignores: ['dist/**', 'node_modules/**'],
   },
 ]);
