@@ -237,9 +237,9 @@ generated config.
 - Spotify Basic Pitch and Essentia.js add model and WebAssembly assets to the
   first relevant load.
 - The repository-backed mode library is provided by the Vite development
-  server and is not available in a purely static production deployment. Core
-  recording, analysis, generation, editing, playback, copying, importing, and
-  downloading remain browser-side.
+  server. Its panel and save actions are hidden in production builds. Core
+  recording, audio-file import, analysis, generation, editing, playback,
+  copying, and downloading remain browser-side.
 - The project is designed primarily for desktop use; small-screen layouts are
   supported, but audio-authoring workflows are easier with a larger display.
 

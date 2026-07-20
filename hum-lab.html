@@ -17,7 +17,15 @@
           <p>Describe a sound with your voice, then turn it into editable procedural audio.</p>
         </div>
         <div class="header-actions">
-          <a class="secondary-button header-guide-link" href="/?guide=1">How it works</a>
+          <a class="secondary-button header-link" href="/?guide=1">How it works</a>
+          <a
+            class="secondary-button header-link"
+            href="__SOURCE_CODE_URL__"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Source code on GitHub (opens in a new tab)"
+            >Source code</a
+          >
           <button class="primary-button" id="record-button" type="button">Record</button>
           <button class="secondary-button" id="stop-button" type="button" disabled>Stop</button>
           <button class="secondary-button" id="clear-button" type="button">Clear</button>
@@ -76,7 +84,7 @@
             </div>
           </div>
 
-          <fieldset class="voice-library">
+          <fieldset class="voice-library" id="mode-library" hidden>
             <legend>Mode library</legend>
             <p>Samples and configs here belong to the active mode. Switching modes keeps each workspace intact.</p>
             <div class="voice-library-grid">

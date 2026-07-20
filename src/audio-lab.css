@@ -300,6 +300,13 @@ button:disabled {
   gap: 24px;
 }
 
+.lab-picker-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .lab-index.is-splash-dismissed {
   gap: 24px;
 }
@@ -440,7 +447,7 @@ button:disabled {
   background: rgba(10, 15, 24, 0.62);
 }
 
-.header-guide-link {
+.header-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -587,6 +594,10 @@ button:disabled {
   gap: 12px;
   margin: 0;
   padding: 16px;
+}
+
+.voice-library[hidden] {
+  display: none;
 }
 
 .voice-library legend {
@@ -1935,7 +1946,8 @@ button:disabled {
   }
 
   .splash-actions,
-  .lab-picker-heading {
+  .lab-picker-heading,
+  .lab-picker-actions {
     align-items: stretch;
     flex-direction: column;
   }

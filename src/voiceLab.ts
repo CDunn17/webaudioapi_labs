@@ -97,6 +97,7 @@ const MODE_DETAILS: Record<CreationMode, ModeDetails> = {
 const STANDARD_ANALYSIS_ENGINES: AnalysisEngineId[] = ['webAudio', 'meyda', 'essentia'];
 const COMPOSITION_ZOOM_LEVELS = [40, 64, 96, 144, 216, 320];
 const COMPOSITION_GAP_MS = 160;
+const localLibraryEnabled = import.meta.env.DEV;
 
 const modeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-mode]'));
 const appVersion = document.getElementById('app-version');
@@ -106,6 +107,7 @@ const clearButton = document.getElementById('clear-button');
 const analyzeButton = document.getElementById('analyze-button');
 const recordingFile = document.getElementById('recording-file');
 const recordingPlayback = document.getElementById('recording-playback');
+const modeLibrary = document.getElementById('mode-library');
 const sampleSaveName = document.getElementById('sample-save-name');
 const saveSampleButton = document.getElementById('save-sample');
 const sampleLibrarySelect = document.getElementById('sample-library-select');
@@ -175,6 +177,7 @@ if (
   !(analyzeButton instanceof HTMLButtonElement) ||
   !(recordingFile instanceof HTMLInputElement) ||
   !(recordingPlayback instanceof HTMLAudioElement) ||
+  !(modeLibrary instanceof HTMLFieldSetElement) ||
   !(sampleSaveName instanceof HTMLInputElement) ||
   !(saveSampleButton instanceof HTMLButtonElement) ||
   !(sampleLibrarySelect instanceof HTMLSelectElement) ||
@@ -238,6 +241,8 @@ if (
 ) {
   throw new Error('Voice Lab markup is missing required elements.');
 }
+
+modeLibrary.hidden = !localLibraryEnabled;
 
 appVersion.textContent = `v${__APP_VERSION__}`;
 
@@ -778,7 +783,7 @@ const restoreWorkspace = (mode: CreationMode): void => {
   renderMode();
   renderFilterVisual();
   renderResults();
-  void refreshLibrary();
+  if (localLibraryEnabled) void refreshLibrary();
 };
 
 const renderMode = (): void => {
@@ -1559,13 +1564,6 @@ const renderResults = (): void => {
         }
       );
     });
-    const saveConfigButton = document.createElement('button');
-    saveConfigButton.className = 'secondary-button';
-    saveConfigButton.type = 'button';
-    saveConfigButton.textContent = 'Save config';
-    saveConfigButton.addEventListener('click', () => {
-      void saveConfigToLibrary(result);
-    });
     const config = document.createElement('pre');
     config.className = 'config-preview';
     config.hidden = true;
@@ -1585,9 +1583,18 @@ const renderResults = (): void => {
       editButton,
       addToCompositionButton,
       viewConfigButton,
-      copyButton,
-      saveConfigButton
+      copyButton
     );
+    if (localLibraryEnabled) {
+      const saveConfigButton = document.createElement('button');
+      saveConfigButton.className = 'secondary-button';
+      saveConfigButton.type = 'button';
+      saveConfigButton.textContent = 'Save config';
+      saveConfigButton.addEventListener('click', () => {
+        void saveConfigToLibrary(result);
+      });
+      actions.append(saveConfigButton);
+    }
 
     card.append(header, metrics);
     if (result.mode === 'beat') card.append(renderBeatLanes(result));
@@ -1875,15 +1882,20 @@ recordingFile.addEventListener('change', () => {
   const file = recordingFile.files?.[0];
   if (file !== undefined) void decodeRecording(file, 'Audio file');
 });
-saveSampleButton.addEventListener('click', () => {
-  void saveCurrentSample();
-});
-loadSampleButton.addEventListener('click', () => {
-  void loadSavedSample();
-});
-loadConfigButton.addEventListener('click', () => {
-  void loadSavedConfig();
-});
+if (localLibraryEnabled) {
+  saveSampleButton.addEventListener('click', () => {
+    void saveCurrentSample();
+  });
+  loadSampleButton.addEventListener('click', () => {
+    void loadSavedSample();
+  });
+  loadConfigButton.addEventListener('click', () => {
+    void loadSavedConfig();
+  });
+  refreshLibraryButton.addEventListener('click', () => {
+    void refreshLibrary();
+  });
+}
 configFile.addEventListener('change', () => {
   const file = configFile.files?.[0];
   if (file === undefined) return;
@@ -1900,9 +1912,6 @@ configFile.addEventListener('change', () => {
       configFile.value = '';
     }
   });
-});
-refreshLibraryButton.addEventListener('click', () => {
-  void refreshLibrary();
 });
 recordingPlayback.addEventListener('play', () => {
   stopPreviewAudio();
@@ -2030,4 +2039,4 @@ window.addEventListener('pagehide', () => {
 renderMode();
 renderResults();
 renderFilterVisual();
-void refreshLibrary();
+if (localLibraryEnabled) void refreshLibrary();
