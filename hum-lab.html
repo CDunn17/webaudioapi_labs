@@ -75,18 +75,6 @@
             </div>
           </div>
 
-          <div class="recording-panel">
-            <div>
-              <strong>Your recording</strong>
-              <span>The recording is available for comparison, but is never included in generated configs.</span>
-            </div>
-            <audio id="recording-playback" controls hidden></audio>
-            <label class="secondary-button file-button" for="recording-file">
-              Use an audio file
-              <input id="recording-file" type="file" accept="audio/*,.m4a" />
-            </label>
-          </div>
-
           <fieldset class="voice-library">
             <legend>Mode library</legend>
             <p>Samples and configs here belong to the active mode. Switching modes keeps each workspace intact.</p>
@@ -121,25 +109,17 @@
             <output class="copy-status" id="library-message" aria-live="polite"></output>
           </fieldset>
 
-          <fieldset class="analysis-engine-picker">
-            <legend>Analysis engines</legend>
-            <label>
-              <input id="engine-web-audio" type="checkbox" value="webAudio" checked />
-              <span><strong>Web Audio + local DSP</strong><small>Small, dependency-free baseline</small></span>
+          <div class="recording-panel">
+            <div>
+              <strong>Your recording</strong>
+              <span>The recording is available for comparison, but is never included in generated configs.</span>
+            </div>
+            <audio id="recording-playback" controls hidden></audio>
+            <label class="secondary-button file-button" for="recording-file">
+              Use an audio file
+              <input id="recording-file" type="file" accept="audio/*,.m4a" />
             </label>
-            <label>
-              <input id="engine-meyda" type="checkbox" value="meyda" checked />
-              <span><strong>Meyda</strong><small>Open-source spectral feature extraction</small></span>
-            </label>
-            <label>
-              <input id="engine-essentia" type="checkbox" value="essentia" checked />
-              <span><strong>Essentia.js</strong><small>WASM onset, rhythm, and probabilistic pitch analysis</small></span>
-            </label>
-            <label id="engine-basic-pitch-option">
-              <input id="engine-basic-pitch" type="checkbox" value="basicPitch" checked />
-              <span><strong>Spotify Basic Pitch</strong><small>Neural note transcription for melody</small></span>
-            </label>
-          </fieldset>
+          </div>
 
           <fieldset class="recording-filters">
             <legend>Analysis filter</legend>

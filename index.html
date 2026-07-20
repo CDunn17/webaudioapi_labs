@@ -4,31 +4,175 @@
     <link rel="stylesheet" type="text/css" href="/src/audio-lab.css" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Web Audio API Labs</title>
+    <meta
+      name="description"
+      content="Explore browser-based tools for designing sound effects, procedural music, and voice-inspired audio with the Web Audio API."
+    />
+    <title>Web Audio API Labs — How It Works</title>
   </head>
   <body>
     <main class="audio-lab lab-index">
-      <header class="app-header">
-        <div>
-          <h1>Web Audio API Labs</h1>
-          <p>Standalone sound-effect and procedural-music workbenches.</p>
+      <section class="splash-hero" aria-labelledby="splash-title">
+        <div class="splash-copy">
+          <p class="splash-eyebrow">Web Audio API Labs</p>
+          <h1 id="splash-title" tabindex="-1">Shape sound.<br />See how it works.</h1>
+          <p class="splash-intro">
+            A set of browser-based workbenches for building sound effects,
+            music, and voice-inspired audio. Every result is procedural: you can
+            listen, adjust the underlying controls, and reuse the configuration
+            without shipping a recorded sample.
+          </p>
+          <div class="splash-actions">
+            <button class="primary-button splash-cta" id="dismiss-splash" type="button">
+              Continue to tools
+            </button>
+            <label class="splash-preference">
+              <input id="hide-splash-preference" type="checkbox" />
+              <span>Don’t show this again</span>
+            </label>
+          </div>
         </div>
-      </header>
 
-      <section class="lab-index-grid" aria-label="Labs">
-        <a class="lab-link" href="/audio-lab.html">
-          <span>Audio Lab</span>
-          <small>Tune layered one-shot and sustained Web Audio effects.</small>
-        </a>
-        <a class="lab-link" href="/music-lab.html">
-          <span>Music Lab</span>
-          <small>Explore procedural score controls and techno presets.</small>
-        </a>
-        <a class="lab-link" href="/hum-lab.html">
-          <span>Voice Lab</span>
-          <small>Turn vocal effects, beats, and melodies into procedural configs.</small>
-        </a>
+        <div class="splash-signal" aria-hidden="true">
+          <span style="--level: 28%; --delay: 0ms"></span>
+          <span style="--level: 52%; --delay: 70ms"></span>
+          <span style="--level: 82%; --delay: 140ms"></span>
+          <span style="--level: 42%; --delay: 210ms"></span>
+          <span style="--level: 68%; --delay: 280ms"></span>
+          <span style="--level: 100%; --delay: 350ms"></span>
+          <span style="--level: 62%; --delay: 420ms"></span>
+          <span style="--level: 36%; --delay: 490ms"></span>
+          <span style="--level: 76%; --delay: 560ms"></span>
+          <span style="--level: 48%; --delay: 630ms"></span>
+          <span style="--level: 24%; --delay: 700ms"></span>
+        </div>
       </section>
+
+      <section class="splash-section how-it-works" aria-labelledby="how-title">
+        <div class="splash-section-heading">
+          <p class="splash-eyebrow">How this works</p>
+          <h2 id="how-title">From an idea to editable audio</h2>
+          <p>
+            Pick the workbench that matches your starting point. Nothing is
+            permanent, so the best way to learn is to play a sound and make
+            small changes as you listen.
+          </p>
+        </div>
+
+        <ol class="splash-steps">
+          <li>
+            <span>01</span>
+            <div>
+              <strong>Choose a starting point</strong>
+              <p>
+                Begin with a preset, build a score, or record a sound with your
+                voice.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span>02</span>
+            <div>
+              <strong>Listen and shape</strong>
+              <p>
+                Preview often, adjust the controls, and compare the result with
+                what you heard.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span>03</span>
+            <div>
+              <strong>Keep the recipe</strong>
+              <p>
+                Copy or save the generated config when it is ready to use in
+                another project.
+              </p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section
+        class="splash-section lab-picker"
+        id="choose-a-lab"
+        aria-labelledby="labs-title"
+      >
+        <div class="lab-picker-heading">
+          <div class="splash-section-heading">
+            <p class="splash-eyebrow">The tools</p>
+            <h2 id="labs-title" tabindex="-1">Choose your lab</h2>
+          </div>
+          <button class="secondary-button" id="show-splash" type="button" hidden>
+            Show how this works
+          </button>
+        </div>
+
+        <div class="lab-index-grid" aria-label="Labs">
+          <a class="lab-link" href="/audio-lab.html">
+            <span class="lab-link-number">01</span>
+            <span class="lab-link-title">Audio Lab</span>
+            <small
+              >Layer and tune one-shot or sustained effects from editable
+              presets.</small
+            >
+            <strong
+              >Best for hits, sweeps, power-ups, and ambience
+              <span aria-hidden="true">→</span></strong
+            >
+          </a>
+          <a class="lab-link" href="/music-lab.html">
+            <span class="lab-link-number">02</span>
+            <span class="lab-link-title">Music Lab</span>
+            <small
+              >Build looping procedural scores with sections, synths, rhythm,
+              and intensity.</small
+            >
+            <strong
+              >Best for themes, pulses, and evolving loops
+              <span aria-hidden="true">→</span></strong
+            >
+          </a>
+          <a class="lab-link" href="/hum-lab.html">
+            <span class="lab-link-number">03</span>
+            <span class="lab-link-title">Voice Lab</span>
+            <small
+              >Turn a vocal sound, beatbox pattern, or hummed melody into an
+              editable config.</small
+            >
+            <strong
+              >Best when your idea is easier to perform
+              <span aria-hidden="true">→</span></strong
+            >
+          </a>
+        </div>
+      </section>
+
+      <aside class="splash-tips" aria-labelledby="tips-title">
+        <div>
+          <p class="splash-eyebrow">Before you begin</p>
+          <h2 id="tips-title">A few tips for better results</h2>
+        </div>
+        <ul>
+          <li>
+            <strong>Start quietly.</strong> Lower your device volume before the
+            first preview.
+          </li>
+          <li>
+            <strong>Change one thing at a time.</strong> Small moves make each
+            control easier to understand.
+          </li>
+          <li>
+            <strong>Record cleanly.</strong> In Voice Lab, use a quiet room and
+            leave clear space between sounds.
+          </li>
+          <li>
+            <strong>Save good iterations.</strong> Copy or download a config
+            before exploring a new direction.
+          </li>
+        </ul>
+      </aside>
     </main>
+    <script type="module" src="/src/splash.ts"></script>
   </body>
 </html>

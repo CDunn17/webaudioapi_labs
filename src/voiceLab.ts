@@ -94,6 +94,7 @@ const MODE_DETAILS: Record<CreationMode, ModeDetails> = {
   },
 };
 
+const STANDARD_ANALYSIS_ENGINES: AnalysisEngineId[] = ['webAudio', 'meyda', 'essentia'];
 const COMPOSITION_ZOOM_LEVELS = [40, 64, 96, 144, 216, 320];
 const COMPOSITION_GAP_MS = 160;
 
@@ -125,11 +126,6 @@ const captureMessage = document.getElementById('capture-message');
 const resultStatus = document.getElementById('result-status');
 const resultsSummary = document.getElementById('results-summary');
 const voiceResults = document.getElementById('voice-results');
-const webAudioCheckbox = document.getElementById('engine-web-audio');
-const meydaCheckbox = document.getElementById('engine-meyda');
-const essentiaCheckbox = document.getElementById('engine-essentia');
-const basicPitchCheckbox = document.getElementById('engine-basic-pitch');
-const basicPitchOption = document.getElementById('engine-basic-pitch-option');
 const filterStartInput = document.getElementById('filter-start');
 const filterEndInput = document.getElementById('filter-end');
 const filterMinLevelInput = document.getElementById('filter-min-level');
@@ -199,11 +195,6 @@ if (
   resultStatus === null ||
   resultsSummary === null ||
   voiceResults === null ||
-  !(webAudioCheckbox instanceof HTMLInputElement) ||
-  !(meydaCheckbox instanceof HTMLInputElement) ||
-  !(essentiaCheckbox instanceof HTMLInputElement) ||
-  !(basicPitchCheckbox instanceof HTMLInputElement) ||
-  !(basicPitchOption instanceof HTMLLabelElement) ||
   !(filterStartInput instanceof HTMLInputElement) ||
   !(filterEndInput instanceof HTMLInputElement) ||
   !(filterMinLevelInput instanceof HTMLInputElement) ||
@@ -795,9 +786,6 @@ const renderMode = (): void => {
   captureTitle.textContent = details.title;
   captureGuidance.textContent = details.guidance;
   captureLimit.textContent = `${details.limitMs / 1000}s`;
-  const isMelody = selectedMode === 'melody';
-  basicPitchCheckbox.disabled = !isMelody;
-  basicPitchOption.hidden = !isMelody;
   analyzeButton.textContent = selectedMode === 'effect'
     ? 'Generate effect configs'
     : selectedMode === 'beat' ? 'Generate beat configs' : 'Generate melody configs';
@@ -820,14 +808,10 @@ const emptyResults = (message: string): void => {
   voiceResults.append(empty);
 };
 
-const selectedEngines = (): AnalysisEngineId[] => {
-  const engines: AnalysisEngineId[] = [];
-  if (webAudioCheckbox.checked) engines.push('webAudio');
-  if (meydaCheckbox.checked) engines.push('meyda');
-  if (essentiaCheckbox.checked) engines.push('essentia');
-  if (selectedMode === 'melody' && basicPitchCheckbox.checked) engines.push('basicPitch');
-  return engines;
-};
+const analysisEnginesForMode = (mode: CreationMode): AnalysisEngineId[] =>
+  mode === 'melody'
+    ? [...STANDARD_ANALYSIS_ENGINES, 'basicPitch']
+    : [...STANDARD_ANALYSIS_ENGINES];
 
 const formatConfig = (result: ProceduralResult): string => {
   const name =
@@ -1763,11 +1747,7 @@ const generateConfigs = async (): Promise<void> => {
   const runId = analysisRunId + 1;
   analysisRunId = runId;
   const mode = selectedMode;
-  const engines = selectedEngines();
-  if (engines.length === 0) {
-    captureMessage.value = 'Select at least one analysis engine.';
-    return;
-  }
+  const engines = analysisEnginesForMode(mode);
   stopPreviewAudio();
   activePreviewEngine = undefined;
   generatedResults = [];
