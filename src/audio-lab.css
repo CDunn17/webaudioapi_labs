@@ -183,6 +183,10 @@ button:disabled {
   font-weight: 700;
 }
 
+.splash-preference[hidden] {
+  display: none;
+}
+
 .splash-preference input {
   width: 17px;
   height: 17px;
@@ -434,6 +438,13 @@ button:disabled {
 
 .secondary-button {
   background: rgba(10, 15, 24, 0.62);
+}
+
+.header-guide-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .primary-button:hover,

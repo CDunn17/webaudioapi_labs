@@ -1,89 +1,247 @@
 # Web Audio API Labs
 
-Current iteration: **v0.0.2**. The Voice Lab header reads this value from `package.json` at build time.
+**Version 0.1.1 · OpenAI Build Week 2026 · Developer Tools**
 
-Standalone Vite labs for experimenting with Web Audio sound effects and procedural music.
+Web Audio API Labs turns sound ideas into editable, sample-free Web Audio
+configurations. It gives web, game, and audio developers three connected
+workbenches for designing sound effects, procedural music, and voice-inspired
+audio directly in the browser.
 
-## Labs
+The central idea is simple: describing a sound with sliders can be slow, while
+making the sound with your voice is immediate. Voice Lab uses a recording as a
+reference, extracts its timing and spectral features, and produces a
+deterministic synthesis recipe. The recording is not shipped with the result.
+The generated configuration can be auditioned, edited, copied, downloaded, and
+combined with other results.
 
-- `audio-lab.html`: layered one-shot and sustained sound-effect editor.
-- `music-lab.html`: procedural score and pulse-sequencing editor.
-- `hum-lab.html`: Voice Lab experiment that turns vocal effects, beatboxing, and melodies into sample-free procedural configs. Recordings remain available for comparison playback, and pluggable Web Audio/local DSP and Meyda analyzers can be run side by side.
+Source repository:
+[github.com/CDunn17/webaudioapi_labs](https://github.com/CDunn17/webaudioapi_labs)
 
-The lab presets live in `src/config/audio.ts` and `src/config/music.ts`. These files are local to this repo, so experiments here are not coupled to Edge of the Drift runtime code.
+## What you can do
 
-### Voice Lab generation
+### Audio Lab
 
-Voice Lab trims leading and trailing silence before analysis, then uses a separate short-hop envelope to retain internal rests, relative peaks, brightness, and pitch contour. Effect layers are hard-gated by measured active regions, and event layers keep their detected timing and local decay. Conservative resonator banks are used only when a strong, low-flatness impact supports ringing; generation no longer scatters inferred fragments between measured events. These timeline fields and primitives remain sample-free and deterministic.
+- Start from editable one-shot and sustained sound-effect presets.
+- Layer oscillators, noise, filters, envelopes, modulation, and timed events.
+- Preview changes immediately and copy the resulting procedural config.
+- Use the same embedded editor that Voice Lab opens for generated effects and
+  beatbox results.
 
-Beat generation combines attack detection with nearby amplitude peaks, groups short peak regions by relative timbre, and derives each lane's tone/noise balance and each hit's level and decay from the recording. Hits retain their positions on the complete trimmed timeline, including the lead-in, and their tails stop at measured valleys. The estimated tempo grid is retained as a visual guide rather than used to quantize playback; silence does not create a fallback hit.
+### Music Lab
 
-The Voice Lab analysis filter applies the same non-destructive start/end trim and minimum/maximum relative-level gate before either analysis engine runs. Original recording playback is unchanged.
+- Build looping procedural scores with sections, notes, rhythm, intensity, and
+  synth controls.
+- Start from included examples, then reshape the arrangement and timbre.
+- Preview and copy the score config without relying on recorded music.
+- Edit Voice Lab melody results on the same note timeline.
 
-Voice Lab can compare Web Audio/local DSP, Meyda, and lazily loaded Essentia.js analysis. Melody mode additionally offers Spotify Basic Pitch, whose local TensorFlow.js model produces note onset, duration, pitch, and velocity data. Melody notes stay on the shared analysis clock, are clipped to measured voiced regions, and retain note-local pitch-bend and gain curves. The external model and WASM assets are bundled locally rather than fetched from a third-party service.
+### Voice Lab
 
-Each Voice Lab mode has an independent in-memory workspace, so its current sample, analysis filter, and generated or loaded config remain in place when switching between sound effect, beat, and melody modes. The development server also provides a local sample/config library under `.voice-lab-library/`. That directory is gitignored; use the Mode library controls to save and reload items, and use JSON import for configs stored elsewhere. The repository-backed library is available while running the Vite development server rather than from a static production build.
+- Record or import a sound effect, beatbox pattern, or hummed melody.
+- Apply a non-destructive time and level filter before analysis.
+- Compare local Web Audio/DSP, Meyda, Essentia.js, and Spotify Basic Pitch
+  analysis paths where applicable.
+- Generate multiple sample-free candidates while retaining measured timing,
+  internal rests, dynamics, and pitch movement.
+- Open any result in an embedded Audio Lab or Music Lab editor.
+- Assemble effect, beat, and melody results on one final composition timeline.
+- Copy configs or download the final composition as JSON.
 
-Every Voice Lab result can be opened in an embedded editor without leaving the current workspace. Effects use Audio Lab's layered synthesis controls, beatbox results use Audio Lab lane, voice, and event controls, and melodies use Music Lab note-timeline and synth controls. Applying changes writes the edited procedural config back to the originating result card for previewing, copying, or saving.
+## Why it matters
 
-Voice Lab also keeps one final composition across effect, beat, and melody mode switches. Any generated or loaded result can be added as a separate timeline item. The composition timeline supports horizontal scrolling, zoom, item start-time adjustment, removal, config copying, and JSON download; items retain their original procedural config format.
+Procedural audio is compact, responsive, and editable, but authoring it often
+requires translating an intuitive sound into unfamiliar synthesis parameters.
+These labs shorten that loop. A developer can perform an idea, inspect what the
+analysis heard, compare generated interpretations, and then refine the result
+with ordinary Web Audio controls.
 
-After creating an initial effect config, Voice Lab uses `OfflineAudioContext` to render a capped set of candidates, analyzes each render with the selected adapter, and keeps the closest feature match. Fitting changes timbre and layer balance without moving event timing, strongly penalizes energy in target silences, and also fits the fused final effect. If offline rendering is unavailable, it retains the initial generated config. Audio Lab uses the same renderer for preview and exposes the procedural primitive parameters for manual fine-tuning.
+The intended audience is developers and technical sound designers who need
+custom interface sounds, game effects, rhythmic material, ambience, or musical
+ideas without adding recorded assets to a project.
 
-## Licensing
+## Quick start
 
-This is a non-commercial, open-source hackathon project. The original project code is made available under the BSD-3-Clause terms declared in `package.json`. Individual third-party dependencies retain their own licenses and copyright notices.
+### Requirements
 
-Voice Lab directly incorporates and distributes the Essentia.js JavaScript and WebAssembly runtime. Essentia.js is licensed under AGPL-3.0, so a combined Voice Lab build containing it is distributed subject to the AGPL-3.0 conditions. In particular:
+- Node.js `^20.19.0` or `>=22.12.0`, as required by the installed Vite version.
+- A current desktop browser with Web Audio API support.
+- `MediaRecorder` and microphone access for live Voice Lab recording. An audio
+  file can be imported when microphone capture is unavailable.
+- Headphones or speakers. Start at a low device volume before previewing audio.
 
-- Users of a distributed or network-accessible Voice Lab build must be offered the complete corresponding source for the deployed version.
-- That source must include the preferred source form, dependency lockfile, build configuration, and scripts needed to reproduce and modify the build.
-- Essentia and AGPL notices must be preserved, and users must retain the AGPL rights to inspect, modify, and redistribute the covered combined work.
-- A hosted version should provide a prominent link to the exact source revision used for the deployment.
-- No additional terms may restrict rights granted by AGPL-3.0.
+A current Chromium-based desktop browser is recommended for judging because it
+provides the most consistent combination of Web Audio, `MediaRecorder`,
+microphone permission, WebAssembly, and local model support. Microphone capture
+requires `localhost` or a secure HTTPS origin.
 
-The original BSD-licensed portions remain available under BSD-3-Clause when used independently of the Essentia-powered combined build. The other labs do not incorporate Essentia and remain under their existing BSD-3-Clause terms.
-
-Spotify Basic Pitch is licensed under Apache-2.0. Meyda is licensed under MIT. Their copyright, attribution, and license notices remain applicable within the combined distribution. BSD-3-Clause, Apache-2.0, and MIT components are compatible with distribution as part of the AGPL-3.0 Voice Lab combination, but their original notices must still be retained.
-
-This project currently uses Essentia's analysis algorithms only; it does not use Essentia's separately licensed pretrained models. See the [Essentia.js license](https://github.com/MTG/essentia.js/blob/master/LICENSE), [Essentia licensing information](https://essentia.upf.edu/licensing_information.html), and [GNU AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html) for the governing terms.
-
-## Local Development
-
-Install dependencies:
+### Install and run
 
 ```sh
-npm install
-```
-
-## Versioning
-
-The app version uses the standard SemVer value in `package.json` as its single source of truth. Vite injects that value into the Voice Lab version badge at build time, and npm keeps `package.json` and `package-lock.json` synchronized.
-
-Use one of these commands when preparing a new version:
-
-```sh
-npm run version:patch       # 0.0.2 -> 0.0.3
-npm run version:minor       # 0.0.2 -> 0.1.0
-npm run version:major       # 0.0.2 -> 1.0.0
-npm run version:prerelease  # 0.0.2 -> 0.0.3-beta.0
-npm run version:show
-```
-
-These commands intentionally do not create a Git commit or tag. Commit the synchronized manifest changes with the related release, then add a Git tag separately when desired.
-
-Run the labs:
-
-```sh
+git clone https://github.com/CDunn17/webaudioapi_labs.git
+cd webaudioapi_labs
+npm ci
 npm run dev
 ```
 
-Open:
+Open the landing page at `http://127.0.0.1:5173/`, or open a lab directly:
 
-- `http://127.0.0.1:5173/`
 - `http://127.0.0.1:5173/audio-lab.html`
 - `http://127.0.0.1:5173/music-lab.html`
 - `http://127.0.0.1:5173/hum-lab.html`
+
+Vite will print a different port if `5173` is already occupied. Allow
+microphone access when the browser prompts for it.
+
+### Production build
+
+```sh
+npm run build
+npm run preview
+```
+
+The production files are written to `dist/`. The app does not require an
+account, cloud database, or OpenAI API key at runtime.
+
+## Suggested judge walkthrough
+
+1. Open the landing page and select **Voice Lab**.
+2. Choose **Sound effect**, record a short vocal effect or import an audio file,
+   and select **Generate configs**.
+3. Compare the generated candidates with the original recording and open a
+   result in the embedded editor.
+4. Change one or two synthesis parameters, apply the edit, and add the result
+   to the final composition.
+5. Switch to **Beat / beatboxing** or **Melody** to see how the same workflow
+   preserves mode-specific timing and pitch information.
+6. Open **Audio Lab** or **Music Lab** from the header to inspect the standalone
+   authoring tools and included presets.
+
+The complete Voice Lab path is the best demonstration of the project. Audio
+Lab and Music Lab also work independently and do not require microphone access.
+
+## How GPT-5.6 and Codex were used
+
+This repository was created during the OpenAI Build Week submission period.
+GPT-5.6 in Codex served as a collaborative engineering partner throughout the
+implementation and refinement process.
+
+Codex accelerated the project by:
+
+- Turning product direction into coordinated TypeScript, HTML, and CSS changes
+  across the multi-page Vite application.
+- Helping decompose the Voice Lab pipeline into capture, analysis, generation,
+  fusion, preview, fitting, and editor-bridge modules.
+- Comparing DSP approaches and tracing timing, silence-gating, pitch, onset,
+  and rendering behavior across several analysis engines.
+- Implementing and refining the embedded Audio Lab and Music Lab editing paths
+  used by generated Voice Lab results.
+- Iterating on responsive UI, accessibility, first-visit guidance, and the
+  manual **How it works** flow.
+- Reviewing repository state, third-party licensing implications, and
+  hackathon submission requirements.
+- Repeatedly running TypeScript, ESLint, and production-build checks after
+  cross-cutting changes.
+
+The human-led product and engineering decisions included:
+
+- Keeping generated results procedural and sample-free instead of embedding
+  the source recording.
+- Preserving measured event timing and internal silence rather than forcing
+  every performance onto a quantized grid.
+- Making analysis choices visible and comparable instead of hiding them behind
+  a single opaque result.
+- Giving users non-destructive filters and embedded editors so generated output
+  remains understandable and correctable.
+- Keeping separate in-memory workspaces for effect, beat, and melody modes while
+  allowing all three to feed one final composition.
+
+Codex was most useful for shortening the distance between those decisions and
+a working implementation: it could inspect the relevant modules, propose a
+coherent change, apply it across the repository, and verify the result in the
+same iteration. The dated Git history provides implementation evidence from the
+hackathon window; the primary Codex `/feedback` session ID is provided
+separately in the Devpost submission.
+
+## Technical design
+
+The project is a TypeScript multi-page application built with Vite. Web Audio
+API nodes synthesize every preview and `OfflineAudioContext` renders bounded
+candidates for analysis and fitting. There is no application framework and no
+runtime service dependency for the core labs.
+
+Relevant areas of the repository:
+
+- `src/config/`: built-in Audio Lab and Music Lab presets.
+- `src/audioLab.ts`: effect, voice, event, and beat editing and rendering.
+- `src/musicLab.ts`: score editing and procedural music playback.
+- `src/voiceLab.ts`: Voice Lab state, capture, analysis orchestration, results,
+  embedded editing, and final composition.
+- `src/voice/`: DSP, analyzers, generators, fusion, fitting, preview, rendering,
+  types, and the editor bridge.
+- `vite/voiceLibraryPlugin.ts`: development-only local sample/config library.
+
+### Voice Lab generation
+
+Voice Lab trims leading and trailing silence before analysis, then uses a
+separate short-hop envelope to retain internal rests, relative peaks,
+brightness, and pitch contour. Effect layers are hard-gated by measured active
+regions, and event layers keep their detected timing and local decay.
+Conservative resonator banks are used only when a strong, low-flatness impact
+supports ringing.
+
+Beat generation combines attack detection with nearby amplitude peaks, groups
+short peak regions by relative timbre, and derives each lane's tone/noise
+balance and each hit's level and decay from the recording. Hits retain their
+positions on the complete trimmed timeline, including the lead-in, and their
+tails stop at measured valleys. The estimated tempo grid is a visual guide; it
+does not quantize playback or create fallback hits from silence.
+
+The analysis filter applies the same non-destructive start/end trim and
+minimum/maximum relative-level gate before each analysis engine runs. Original
+recording playback is unchanged.
+
+Voice Lab can compare Web Audio/local DSP, Meyda, and lazily loaded Essentia.js
+analysis. Melody mode additionally offers Spotify Basic Pitch, whose bundled
+TensorFlow.js model produces note onset, duration, pitch, and velocity data.
+Melody notes stay on the shared analysis clock, are clipped to measured voiced
+regions, and retain note-local pitch-bend and gain curves. The external model
+and WebAssembly assets are bundled locally rather than fetched from a third
+party at runtime.
+
+After creating an initial effect config, Voice Lab uses `OfflineAudioContext`
+to render a capped set of candidates, analyzes each render with the selected
+adapter, and keeps the closest feature match. Fitting changes timbre and layer
+balance without moving event timing and strongly penalizes energy in target
+silences. If offline rendering is unavailable, Voice Lab retains the initial
+generated config.
+
+## Data and privacy
+
+- Microphone access is requested only after the user selects **Record**.
+- Recordings and analysis results remain in browser memory during the session.
+- The app does not upload recordings to OpenAI or another hosted analysis
+  service.
+- Users can explicitly import local audio/config files and download generated
+  JSON.
+- When running the Vite development server, users can explicitly save samples
+  and configs to `.voice-lab-library/` on their own machine. That directory is
+  gitignored.
+
+## Current limitations
+
+- Generated configs are heuristic interpretations, not exact audio
+  reconstructions. The comparison and editing tools are part of the intended
+  workflow.
+- Browser decoding and recording-format support vary. File import is the
+  fallback when a microphone or recording format is unavailable.
+- Spotify Basic Pitch and Essentia.js add model and WebAssembly assets to the
+  first relevant load.
+- The repository-backed mode library is provided by the Vite development
+  server and is not available in a purely static production deployment. Core
+  recording, analysis, generation, editing, playback, copying, importing, and
+  downloading remain browser-side.
+- The project is designed primarily for desktop use; small-screen layouts are
+  supported, but audio-authoring workflows are easier with a larger display.
 
 ## Verification
 
@@ -92,3 +250,50 @@ npm run type-check
 npm run lint
 npm run build
 ```
+
+These commands perform a TypeScript check, run ESLint over the application and
+Vite plugin, and create the production bundle.
+
+## Versioning
+
+`package.json` is the single source of truth for the application version. Vite
+injects it into the Voice Lab version badge at build time, and npm keeps
+`package.json` and `package-lock.json` synchronized.
+
+```sh
+npm run version:patch       # 0.1.1 -> 0.1.2
+npm run version:minor       # 0.1.1 -> 0.2.0
+npm run version:major       # 0.1.1 -> 1.0.0
+npm run version:prerelease  # 0.1.1 -> 0.1.2-beta.0
+npm run version:show
+```
+
+These commands do not create a Git commit or tag. Commit the synchronized
+manifest changes with the related release, then add a Git tag separately if
+desired.
+
+## Licensing
+
+The original project code is made available under the BSD-3-Clause terms
+declared in `package.json`. Third-party dependencies retain their respective
+licenses and copyright notices.
+
+Voice Lab directly incorporates and distributes the Essentia.js JavaScript and
+WebAssembly runtime. Essentia.js is licensed under AGPL-3.0, so distribution or
+network access to a combined Voice Lab build must comply with the applicable
+AGPL-3.0 conditions. Corresponding source for a deployed version should include
+the preferred source form, dependency lockfile, build configuration, scripts,
+and preserved license notices, with a prominent link to the exact deployed
+source revision.
+
+The original BSD-licensed portions remain available under BSD-3-Clause when
+used independently of the Essentia-powered combined build. Spotify Basic Pitch
+is licensed under Apache-2.0, and Meyda is licensed under MIT. Their attribution
+and license requirements continue to apply.
+
+This project uses Essentia's analysis algorithms and does not use Essentia's
+separately licensed pretrained models. See the
+[Essentia.js license](https://github.com/MTG/essentia.js/blob/master/LICENSE),
+[Essentia licensing information](https://essentia.upf.edu/licensing_information.html),
+and [GNU AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html) for additional
+information.
