@@ -14,6 +14,9 @@ deterministic synthesis recipe. The recording is not shipped with the result.
 The generated configuration can be auditioned, edited, copied, downloaded, and
 combined with other results.
 
+Live demo:
+[audiolabs.dunnstock.workers.dev](https://audiolabs.dunnstock.workers.dev)
+
 Source repository:
 [github.com/CDunn17/webaudioapi_labs](https://github.com/CDunn17/webaudioapi_labs)
 
@@ -104,7 +107,8 @@ account, cloud database, or OpenAI API key at runtime.
 
 ## Suggested judge walkthrough
 
-1. Open the landing page and select **Voice Lab**.
+1. Open the [live demo](https://audiolabs.dunnstock.workers.dev) and select
+   **Voice Lab**.
 2. Choose **Sound effect**, record a short vocal effect or import an audio file,
    and select **Generate configs**.
 3. Compare the generated candidates with the original recording and open a
