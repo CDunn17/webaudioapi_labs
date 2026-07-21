@@ -9,23 +9,26 @@
     "build": "vite build",
     "dev": "vite --host 127.0.0.1",
     "lint": "eslint 'src/**/*.ts' vite.config.ts 'vite/**/*.ts'",
-    "preview": "vite preview --host 127.0.0.1",
+    "preview": "npm run build && wrangler dev",
     "type-check": "tsc --noEmit",
     "version:major": "npm version major --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:prerelease": "npm version prerelease --preid=beta --no-git-tag-version",
-    "version:show": "npm pkg get version"
+    "version:show": "npm pkg get version",
+    "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@cloudflare/vite-plugin": "^1.45.1",
     "@eslint/js": "10.0.1",
+    "@types/node": "^26.1.1",
     "eslint": "10.4.0",
     "globals": "17.6.0",
     "prettier": "3.8.3",
     "typescript": "6.0.3",
     "typescript-eslint": "8.59.4",
-    "vite": "^7.3.2"
+    "vite": "^7.3.2",
+    "wrangler": "^4.112.0"
   },
   "dependencies": {
     "@spotify/basic-pitch": "^1.0.1",

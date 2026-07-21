@@ -2,6 +2,8 @@ import { defineConfig, type Plugin } from 'vite';
 import packageConfig from './package.json';
 import { voiceLibraryPlugin } from './vite/voiceLibraryPlugin';
 
+import { cloudflare } from "@cloudflare/vite-plugin";
+
 const SOURCE_REPOSITORY_URL = 'https://github.com/CDunn17/webaudioapi_labs';
 const sourceRevision = [
   process.env.CF_PAGES_COMMIT_SHA,
@@ -20,7 +22,7 @@ const sourceCodeLinkPlugin = (): Plugin => ({
 });
 
 export default defineConfig({
-  plugins: [sourceCodeLinkPlugin(), voiceLibraryPlugin()],
+  plugins: [sourceCodeLinkPlugin(), voiceLibraryPlugin(), cloudflare()],
   define: {
     __APP_VERSION__: JSON.stringify(packageConfig.version),
   },
