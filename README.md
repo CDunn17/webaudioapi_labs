@@ -17,6 +17,9 @@ combined with other results.
 Live demo:
 [audiolabs.dunnstock.workers.dev](https://audiolabs.dunnstock.workers.dev)
 
+Video walkthrough:
+[youtu.be/LD3Jqg8CqYk](https://youtu.be/LD3Jqg8CqYk)
+
 Source repository:
 [github.com/CDunn17/webaudioapi_labs](https://github.com/CDunn17/webaudioapi_labs)
 
@@ -117,54 +120,35 @@ account, cloud database, or OpenAI API key at runtime.
    to the final composition.
 5. Switch to **Beat / beatboxing** or **Melody** to see how the same workflow
    preserves mode-specific timing and pitch information.
-6. Open **Audio Lab** or **Music Lab** from the header to inspect the standalone
-   authoring tools and included presets.
+6. Return to the landing page and open **Audio Lab** or **Music Lab** to inspect
+   the standalone authoring tools and included presets.
 
 The complete Voice Lab path is the best demonstration of the project. Audio
 Lab and Music Lab also work independently and do not require microphone access.
 
-## How GPT-5.6 and Codex were used
+## Development with GPT-5.6
 
-This repository was created during the OpenAI Build Week submission period.
-GPT-5.6 in Codex served as a collaborative engineering partner throughout the
-implementation and refinement process.
+GPT-5.6 in Codex was used throughout the Build Week implementation. The main
+sessions relevant to the submission are:
 
-Codex accelerated the project by:
+- `019f7739-dd50-7b60-8c03-21309518d8ca` — July 18, `gpt-5.6-sol` with ultra
+  reasoning. This was the main audio-fidelity pass across local DSP, Meyda,
+  Essentia.js, and Basic Pitch. It covered timing, rests, dynamics, pitch,
+  cross-sample-rate behavior, and a 38-case cross-engine fixture matrix.
+- `019f81f4-cd97-7fd1-8dcd-7ed30a4eee8d` — July 20, `gpt-5.6-sol` with high
+  reasoning. This covered final debugging, recording-state review, README
+  cleanup, and submission preparation.
 
-- Turning product direction into coordinated TypeScript, HTML, and CSS changes
-  across the multi-page Vite application.
-- Helping decompose the Voice Lab pipeline into capture, analysis, generation,
-  fusion, preview, fitting, and editor-bridge modules.
-- Comparing DSP approaches and tracing timing, silence-gating, pitch, onset,
-  and rendering behavior across several analysis engines.
-- Implementing and refining the embedded Audio Lab and Music Lab editing paths
-  used by generated Voice Lab results.
-- Iterating on responsive UI, accessibility, first-visit guidance, and the
-  manual **How it works** flow.
-- Reviewing repository state, third-party licensing implications, and
-  hackathon submission requirements.
-- Repeatedly running TypeScript, ESLint, and production-build checks after
-  cross-cutting changes.
+Codex was used to trace the Voice Lab capture, analysis, generation, fitting,
+preview, and editor paths; implement coordinated TypeScript, HTML, and CSS
+changes; compare analyzer behavior; and run TypeScript, ESLint, fixture, and
+production-build checks.
 
-The human-led product and engineering decisions included:
-
-- Keeping generated results procedural and sample-free instead of embedding
-  the source recording.
-- Preserving measured event timing and internal silence rather than forcing
-  every performance onto a quantized grid.
-- Making analysis choices visible and comparable instead of hiding them behind
-  a single opaque result.
-- Giving users non-destructive filters and embedded editors so generated output
-  remains understandable and correctable.
-- Keeping separate in-memory workspaces for effect, beat, and melody modes while
-  allowing all three to feed one final composition.
-
-Codex was most useful for shortening the distance between those decisions and
-a working implementation: it could inspect the relevant modules, propose a
-coherent change, apply it across the repository, and verify the result in the
-same iteration. The dated Git history provides implementation evidence from the
-hackathon window; the primary Codex `/feedback` session ID is provided
-separately in the Devpost submission.
+I set the product direction and the constraints used during those passes: keep
+the output procedural and sample-free, preserve measured timing and silence,
+show the analyzer-specific results, and keep every generated config editable.
+The dated Git history records the resulting code changes, while the session IDs
+identify the associated Codex transcripts.
 
 ## Technical design
 
@@ -180,8 +164,8 @@ Relevant areas of the repository:
 - `src/musicLab.ts`: score editing and procedural music playback.
 - `src/voiceLab.ts`: Voice Lab state, capture, analysis orchestration, results,
   embedded editing, and final composition.
-- `src/voice/`: DSP, analyzers, generators, fusion, fitting, preview, rendering,
-  types, and the editor bridge.
+- `src/voice/`: DSP, analyzers, generators, fitting, preview, effect rendering,
+  shared types, and the editor bridge.
 - `vite/voiceLibraryPlugin.ts`: development-only local sample/config library.
 
 ### Voice Lab generation

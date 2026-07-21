@@ -253,8 +253,7 @@ let recordingBlob: Blob | undefined;
 let recordingSourceLabel = 'Microphone';
 let recordingUrl: string | undefined;
 let recorder: MediaRecorder | undefined;
-let recordingChunks: Blob[] = [];
-let discardStoppedRecording = false;
+let captureRunId = 0;
 let mediaStream: MediaStream | undefined;
 let captureContext: AudioContext | undefined;
 let captureAnalyser: AnalyserNode | undefined;
@@ -1641,6 +1640,8 @@ const decodeRecording = async (blob: Blob, sourceLabel: string): Promise<void> =
   analyzeButton.disabled = true;
   recordButton.disabled = true;
   saveSampleButton.disabled = true;
+  recordingFile.disabled = true;
+  modeLibrary.disabled = true;
   setModeButtonsDisabled(true);
   setCaptureStatus('Decoding');
   captureMessage.value = '';
@@ -1656,7 +1657,7 @@ const decodeRecording = async (blob: Blob, sourceLabel: string): Promise<void> =
     analyzeButton.disabled = false;
     saveSampleButton.disabled = false;
     setCaptureStatus('Ready');
-    captureMessage.value = 'Recording ready. Generate one or both procedural interpretations.';
+    captureMessage.value = 'Recording ready. Generate procedural interpretations.';
     saveActiveWorkspace();
   } catch {
     if (runId !== analysisRunId || mode !== selectedMode) return;
@@ -1666,17 +1667,19 @@ const decodeRecording = async (blob: Blob, sourceLabel: string): Promise<void> =
     setCaptureStatus('Unsupported');
     captureMessage.value = 'This browser could not decode that audio format.';
   } finally {
-    await context.close().catch(() => undefined);
     if (runId === analysisRunId && mode === selectedMode) {
       recordButton.disabled = false;
+      recordingFile.disabled = false;
+      modeLibrary.disabled = false;
       setModeButtonsDisabled(false);
     }
+    void context.close().catch(() => undefined);
   }
 };
 
 const stopRecording = (): void => {
-  if (recorder?.state === 'recording') recorder.stop();
-  recordButton.disabled = false;
+  if (recorder?.state !== 'recording') return;
+  recorder.stop();
   stopButton.disabled = true;
   setCaptureStatus('Processing');
 };
@@ -1695,15 +1698,31 @@ const startRecording = async (): Promise<void> => {
     captureMessage.value = 'Microphone recording is not available in this browser.';
     return;
   }
+  if (recordButton.disabled || recorder?.state === 'recording' || mediaStream !== undefined) return;
+
+  const runId = captureRunId + 1;
+  captureRunId = runId;
+  recordButton.disabled = true;
+  stopButton.disabled = true;
+  recordingFile.disabled = true;
+  modeLibrary.disabled = true;
+  setModeButtonsDisabled(true);
+  setCaptureStatus('Requesting');
+  captureMessage.value = '';
+  let requestedStream: MediaStream | undefined;
+  let recordingStarted = false;
+
   try {
     stopPreviewAudio();
     recordingPlayback.pause();
-    generatedResults = [];
-    renderResults();
-    captureMessage.value = '';
-    mediaStream = await navigator.mediaDevices.getUserMedia({
+    requestedStream = await navigator.mediaDevices.getUserMedia({
       audio: { autoGainControl: false, echoCancellation: false, noiseSuppression: false },
     });
+    if (runId !== captureRunId) {
+      requestedStream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    mediaStream = requestedStream;
     captureContext = new AudioContext();
     const source = captureContext.createMediaStreamSource(mediaStream);
     captureAnalyser = captureContext.createAnalyser();
@@ -1712,40 +1731,51 @@ const startRecording = async (): Promise<void> => {
     const preferredMime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((type) =>
       MediaRecorder.isTypeSupported(type)
     );
-    recorder = preferredMime === undefined
+    const activeRecorder = preferredMime === undefined
       ? new MediaRecorder(mediaStream)
       : new MediaRecorder(mediaStream, { mimeType: preferredMime });
-    discardStoppedRecording = false;
-    recordingChunks = [];
-    recorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) recordingChunks.push(event.data);
+    recorder = activeRecorder;
+    const chunks: Blob[] = [];
+    activeRecorder.addEventListener('dataavailable', (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
     });
-    recorder.addEventListener('stop', () => {
-      const blob = new Blob(recordingChunks, { type: recorder?.mimeType || 'audio/webm' });
+    activeRecorder.addEventListener('stop', () => {
+      if (runId !== captureRunId || recorder !== activeRecorder) return;
+      const blob = new Blob(chunks, { type: activeRecorder.mimeType || 'audio/webm' });
       cleanCaptureResources();
       recorder = undefined;
-      if (discardStoppedRecording) {
-        discardStoppedRecording = false;
-        return;
-      }
       void decodeRecording(blob, 'Microphone');
     }, { once: true });
-    recorder.start(100);
+    activeRecorder.start(100);
+    recordingStarted = true;
+    analysisRunId += 1;
+    generatedResults = [];
+    analyzeButton.disabled = true;
+    renderResults();
     captureStartedAt = performance.now();
     captureInterval = window.setInterval(updateCaptureMeter, 70);
     limitTimer = window.setTimeout(stopRecording, MODE_DETAILS[selectedMode].limitMs);
-    recordButton.disabled = true;
     stopButton.disabled = false;
-    setModeButtonsDisabled(true);
     setCaptureStatus('Recording');
-  } catch {
+  } catch (error) {
+    if (runId !== captureRunId) {
+      requestedStream?.getTracks().forEach((track) => track.stop());
+      return;
+    }
     cleanCaptureResources();
     recorder = undefined;
     recordButton.disabled = false;
     stopButton.disabled = true;
+    if (recordingStarted) analyzeButton.disabled = decodedRecording === undefined;
+    recordingFile.disabled = false;
+    modeLibrary.disabled = false;
     setModeButtonsDisabled(false);
-    setCaptureStatus('Blocked');
-    captureMessage.value = 'Microphone permission was not available.';
+    const permissionDenied = error instanceof DOMException
+      && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
+    setCaptureStatus(permissionDenied ? 'Blocked' : 'Error');
+    captureMessage.value = permissionDenied
+      ? 'Microphone permission was not available.'
+      : `Recording could not start${error instanceof Error ? `: ${error.message}` : '.'}`;
   }
 };
 
@@ -1822,10 +1852,11 @@ const generateConfigs = async (): Promise<void> => {
 
 const clearRecording = (): void => {
   analysisRunId += 1;
+  captureRunId += 1;
   if (recorder?.state === 'recording') {
-    discardStoppedRecording = true;
     recorder.stop();
   }
+  recorder = undefined;
   cleanCaptureResources();
   stopRecordingPlayhead();
   stopPreviewAudio();
@@ -1841,6 +1872,8 @@ const clearRecording = (): void => {
   recordingPlayback.removeAttribute('src');
   recordingPlayback.hidden = true;
   recordingFile.value = '';
+  recordingFile.disabled = false;
+  modeLibrary.disabled = false;
   captureTime.textContent = '0.0s';
   inputKind.textContent = 'Microphone';
   captureMessage.value = '';
@@ -1880,6 +1913,7 @@ analyzeButton.addEventListener('click', () => {
 });
 recordingFile.addEventListener('change', () => {
   const file = recordingFile.files?.[0];
+  recordingFile.value = '';
   if (file !== undefined) void decodeRecording(file, 'Audio file');
 });
 if (localLibraryEnabled) {
@@ -2030,6 +2064,8 @@ previewModalAudio.muted = previewResultMute.checked;
 previewOriginalAudio.volume = Number(previewOriginalVolume.value);
 previewOriginalAudio.muted = previewOriginalMute.checked;
 window.addEventListener('pagehide', () => {
+  captureRunId += 1;
+  recorder = undefined;
   cleanCaptureResources();
   stopRecordingPlayhead();
   preview.close();
